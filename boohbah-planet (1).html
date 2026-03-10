@@ -1,0 +1,1217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stranded on Boohbah Planet</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#0a0a1a;overflow:hidden;font-family:'VT323',monospace;color:#e0d8ff;user-select:none;}
+#gameCanvas{display:block;position:absolute;top:0;left:0;}
+
+/* ── HUD top-left ── */
+#hud{position:fixed;top:10px;left:10px;z-index:100;pointer-events:none;}
+.stat{font-size:21px;color:#ffe566;text-shadow:0 0 8px #ffaa00;line-height:1.8;}
+.stat small{font-size:13px;color:#555;}
+
+/* ── RIGHT PANEL ── */
+#panel{
+  position:fixed;right:0;top:0;width:272px;height:100vh;
+  background:rgba(6,3,20,.98);border-left:2px solid #4422aa;
+  z-index:200;display:flex;flex-direction:column;overflow:hidden;
+  box-shadow:-4px 0 22px rgba(80,30,255,.28);
+}
+#panel h2{
+  font-family:'Press Start 2P',monospace;font-size:8px;color:#aa66ff;
+  text-align:center;padding:8px 0 8px;border-bottom:1px solid #2a1a44;flex-shrink:0;
+}
+/* INFO BOX — fixed height inline block, never floats, never overlaps anything */
+#tipBox{
+  flex-shrink:0;height:112px;
+  border-bottom:2px solid #2a1a44;
+  background:rgba(10,4,28,.97);
+  padding:9px 12px 7px;display:flex;flex-direction:column;justify-content:center;overflow:hidden;
+}
+#tipBox .tip-empty{font-size:12px;color:#332244;text-align:center;line-height:1.6;}
+#tipBox .tip-title{color:#cc88ff;font-size:13px;font-weight:bold;margin-bottom:4px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#tipBox .tip-desc{font-size:12px;color:#aaa;line-height:1.42;
+  overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;}
+#tipBox .tip-cost{color:#ffe566;font-size:11px;margin-top:5px;
+  border-top:1px solid #2a1a44;padding-top:4px;flex-shrink:0;}
+/* Scrollable list */
+#pList{flex:1;overflow-y:auto;padding:5px 6px;min-height:0;}
+.pSec{margin-bottom:9px;}
+.pSec h3{
+  font-family:'Press Start 2P',monospace;font-size:6px;color:#ff88cc;
+  padding:3px 5px;background:rgba(255,50,150,.07);border-left:3px solid #ff44aa;margin-bottom:3px;
+}
+.pRow{
+  display:flex;align-items:center;gap:6px;padding:5px 7px;margin-bottom:2px;
+  border-radius:3px;background:rgba(32,16,56,.8);border:1px solid #382060;
+  font-size:15px;cursor:default;transition:border-color .12s,background .12s;
+}
+.pRow:hover{background:rgba(52,26,86,.95);border-color:#8055cc;}
+.pRow .ico{font-size:17px;flex-shrink:0;width:22px;text-align:center;}
+.pRow .inf{flex:1;min-width:0;line-height:1.2;}
+.pRow .inf b{display:block;font-size:13px;color:#ddd;}
+.pRow .inf small{font-size:10px;color:#666;}
+.pRow .bdg{font-size:10px;flex-shrink:0;color:#ffe566;white-space:nowrap;}
+.pRow.owned{border-color:#44ff88;background:rgba(18,44,26,.7);}.pRow.owned .inf b{color:#55ffaa;}
+.pRow.maxed{border-color:#ffaa22;background:rgba(44,26,8,.7);}.pRow.maxed .inf b{color:#ffcc44;}
+/* Minimap docked at bottom */
+#mmWrap{flex-shrink:0;padding:5px 6px 6px;border-top:1px solid #2a1a44;background:rgba(4,2,14,.95);}
+#mmWrap p{font-size:9px;color:#443366;text-align:center;margin-bottom:3px;font-family:'Press Start 2P',monospace;}
+#mmCvs{display:block;margin:0 auto;border:1px solid #4422aa;}
+
+/* Messages */
+#msgLog{position:fixed;bottom:10px;left:10px;z-index:100;pointer-events:none;}
+.msg{font-size:17px;color:#88ffcc;text-shadow:0 0 6px #00ffaa;animation:fm 3.2s forwards;display:block;}
+@keyframes fm{0%{opacity:1;transform:translateY(0)}75%{opacity:1;transform:translateY(-8px)}100%{opacity:0;transform:translateY(-22px)}}
+
+/* Title screen */
+#titleScreen{
+  position:fixed;inset:0;background:radial-gradient(ellipse at center,#1a0a3a,#050510);
+  z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+}
+#titleScreen h1{font-family:'Press Start 2P',monospace;font-size:clamp(10px,2vw,17px);
+  color:#ff88cc;text-shadow:0 0 20px #ff44aa;text-align:center;line-height:1.8;}
+#titleScreen p{font-size:18px;color:#aaa;max-width:480px;text-align:center;line-height:1.6;}
+#startBtn{font-family:'Press Start 2P',monospace;font-size:11px;padding:12px 26px;
+  background:transparent;border:2px solid #ff44aa;color:#ff88cc;cursor:pointer;letter-spacing:2px;transition:all .2s;}
+#startBtn:hover{background:rgba(255,68,170,.18);box-shadow:0 0 20px #ff44aa;transform:scale(1.05);}
+.spin{animation:sp 5s linear infinite;display:inline-block;font-size:50px;}
+@keyframes sp{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+
+<div id="hud">
+  <div class="stat">💰 <span id="sMoney">50</span></div>
+  <div class="stat">⚡ <span id="sIncome">1.0</span>/s</div>
+  <div class="stat">❤️ <span id="sHp">100</span>/<span id="sMaxHp">100</span></div>
+  <div class="stat">🗡️ <span id="sWeapon">👊 Fists</span></div>
+  <div class="stat" id="sPassives" style="font-size:13px;color:#9977cc;min-height:20px;"></div>
+  <div class="stat"><small>WASD · Click=attack · E=buy pad</small></div>
+</div>
+
+<div id="panel">
+  <h2>🛸 BASE STATUS</h2>
+  <div id="tipBox">
+    <div class="tip-empty" id="tipEmpty">Hover an item for details</div>
+    <div id="tipContent" style="display:none">
+      <div class="tip-title" id="tipTitle"></div>
+      <div class="tip-desc"  id="tipDesc"></div>
+      <div class="tip-cost"  id="tipCost" style="display:none"></div>
+    </div>
+  </div>
+  <div id="pList"></div>
+  <div id="mmWrap">
+    <p>MINIMAP</p>
+    <canvas id="mmCvs" width="258" height="128"></canvas>
+  </div>
+</div>
+
+<div id="msgLog"></div>
+
+<div id="titleScreen">
+  <div class="spin">🪐</div>
+  <h1>STRANDED ON<br>BOOHBAH PLANET</h1>
+  <p>You are <b style="color:#ff88cc">Phil Collins</b>. Your tour bus crashed here.<br>
+  Walk to glowing pads <b>inside your base</b> and press <b style="color:#ffe566">E</b> to buy.<br>
+  Hover items on the right panel for details. Build up. Survive.</p>
+  <button id="startBtn" onclick="startGame()">▶ BEGIN</button>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════
+//  BOOHBAH PLANET — Phil Collins Survival Tycoon
+// ═══════════════════════════════════════════════════
+const cvs=document.getElementById('gameCanvas');
+const ctx=cvs.getContext('2d');
+const mmCvs=document.getElementById('mmCvs');
+const mmc=mmCvs.getContext('2d');
+cvs.width=innerWidth; cvs.height=innerHeight;
+window.addEventListener('resize',()=>{cvs.width=innerWidth;cvs.height=innerHeight;});
+
+// ── WORLD ──────────────────────────────────────────
+const WW=6400,WH=6400,TILE=40;
+const CX=WW/2, CY=WH/2;
+const WT=20, GAP=80; // wall thickness, door gap width
+
+// ── STATE ──────────────────────────────────────────
+let running=false,money=99999999999999,income=1,incAcc=0,lastT=0,beaconT=0;
+let camX=0,camY=0;
+let walls=[],doors=[],enemies=[],bullets=[],turrets=[],mines=[],pfx=[],splashPfx=[];
+
+// ── PLAYER ─────────────────────────────────────────
+const P={x:0,y:0,w:30,h:30,speed:160,hp:100,maxHp:100,regen:0,armor:0,aura:false,auraR:0,vampR:0};
+
+// ── INPUT ──────────────────────────────────────────
+const K={};
+document.addEventListener('keydown',e=>{K[e.key]=true;});
+document.addEventListener('keyup',  e=>{K[e.key]=false;});
+const mouse={x:0,y:0};
+document.addEventListener('mousemove',e=>{mouse.x=e.clientX;mouse.y=e.clientY;});
+document.addEventListener('mousedown',e=>{if(e.button===0)doSwing();});
+
+// ── WEAPON ─────────────────────────────────────────
+const WPN={dmg:20,range:75,cd:0.45,t:0,swT:0,swDur:0.18,swA:0,sw:false,lv:0,
+  names:['👊 Fists','🥁 Drumstick','🎤 Mic Stand','🥁 Golden Kit']};
+
+// ═══════════════════════════════════════════════════
+//  ASYMMETRIC BASE LAYOUT  (v3 — massively upscaled)
+//
+//  Deliberate asymmetry:
+//   - Hub is wide and squat (700×620), offset ABOVE world centre
+//   - Tower: tall narrow room, hard-left of hub top
+//   - Armory: huge, right of hub but offset DOWN
+//   - Barracks: tall, left but offset UP — opposite of armory
+//   - Generator: enormous, bottom-left of hub
+//   - Lab: bottom-right off Generator
+//   - Market: far right off Generator, wider than Lab
+//
+//  Every room is sized so pads can be 160px apart.
+//  GAP = 90px (wide corridors, easy to walk through).
+// ═══════════════════════════════════════════════════
+
+// World is 6400×6400, hub centred slightly above-left
+const HUB={x:CX-350, y:CY-360, w:700, h:620};
+const H_L=HUB.x, H_R=HUB.x+HUB.w, H_T=HUB.y, H_B=HUB.y+HUB.h;
+
+const WINGS={
+  // TOWER — narrow tall room, far upper-left, offset from hub centre
+  tower:{
+    x: HUB.x + 40,
+    y: H_T - 500 - WT*2,
+    w: 280, h: 500,
+    floor:'#080e18', label:'Watch Tower',
+    passX: HUB.x + 40 + 140,   // gap centre on hub top wall
+    passY: null,
+  },
+  // ARMORY — very wide, right side, lower than hub vertical centre
+  armory:{
+    x: H_R + WT*2,
+    y: HUB.y + 180,
+    w: 560, h: 380,
+    floor:'#1a0a08', label:'Armory',
+    passX: null,
+    passY: HUB.y + 180 + 190,   // gap centre on hub right wall
+  },
+  // BARRACKS — tall, left side, starts near top of hub (upper offset, opposite of armory)
+  barracks:{
+    x: H_L - 440 - WT*2,
+    y: HUB.y + 40,
+    w: 440, h: 520,
+    floor:'#081a18', label:'Barracks',
+    passX: null,
+    passY: HUB.y + 40 + 200,    // gap centre on hub left wall
+  },
+  // GENERATOR — enormous, bottom side but shifted LEFT (not centred)
+  genroom:{
+    x: HUB.x - 80,
+    y: H_B + WT*2,
+    w: 580, h: 440,
+    floor:'#0e1a0e', label:'Generator Room',
+    passX: HUB.x - 80 + 290,    // gap centre on hub bottom wall
+    passY: null,
+  },
+  // LAB — off right side of Generator, taller than wide
+  lab:{
+    x: HUB.x - 80 + 580 + WT*2,
+    y: H_B + WT*2 + 80,
+    w: 360, h: 380,
+    floor:'#1a1008', label:'Research Lab',
+    passX: null,
+    passY: H_B + WT*2 + 80 + 180,   // gap centre on gen right wall
+  },
+  // MARKET — off left side of Generator, wide and low
+  market:{
+    x: HUB.x - 80 - 420 - WT*2,
+    y: H_B + WT*2 + 140,
+    w: 420, h: 320,
+    floor:'#0a0e1a', label:'Black Market',
+    passX: null,
+    passY: H_B + WT*2 + 140 + 160,  // gap centre on gen left wall
+  },
+};
+const OPEN={tower:false,armory:false,barracks:false,genroom:false,lab:false,market:false};
+
+// ── UPGRADE DEFINITIONS ────────────────────────────
+const UPG={
+  // INCOME — in hub, large spaced grid
+  i_scrap:    {icon:'🪨',label:'Scrap Pile',    type:'inc',cost:30,   iv:2,  desc:'Salvaged metal scrap generates a steady passive trickle.'},
+  i_moss:     {icon:'🌿',label:'Alien Moss',    type:'inc',cost:60,   iv:4,  desc:'Bioluminescent alien moss. Weirdly profitable.'},
+  i_crystal:  {icon:'💎',label:'Crystal Vein',  type:'inc',cost:150,  iv:8,  desc:'Rare alien crystals fetch huge prices off-world.'},
+  i_nest:     {icon:'🪺',label:'Boohbah Nest',  type:'inc',cost:320,  iv:18, desc:'They pay you NOT to hatch the eggs. Smart.'},
+  i_star:     {icon:'⭐',label:'Star Fragment',  type:'inc',cost:700,  iv:35, desc:'Fallen star chips sell for absurd galactic prices.'},
+  i_plasma:   {icon:'🔵',label:'Plasma Core',   type:'inc',cost:1600, iv:70, desc:'Unstable plasma reactor. High risk, higher reward.'},
+  i_dark:     {icon:'🌑',label:'Dark Matter',   type:'inc',cost:4000, iv:150,desc:'Completely incomprehensible. Somehow makes money.'},
+  i_royalties:{icon:'🎵',label:'Phil Royalties',type:'inc',cost:8000, iv:300,desc:'"In the Air Tonight" keeps paying out. Eternally.'},
+
+  // ROOMS
+  r_tower:    {icon:'🗼',label:'Watch Tower',     type:'room',cost:200, rk:'tower',   desc:'Opens the north-west corridor. Unlocks a tall sniper tower with long-range upgrades.'},
+  r_armory:   {icon:'🔫',label:'Armory',          type:'room',cost:250, rk:'armory',  desc:'Opens the east wall. Unlocks the wide Armory wing with turrets and mines.'},
+  r_barracks: {icon:'🪖',label:'Barracks',        type:'room',cost:250, rk:'barracks',desc:'Opens the west wall. Unlocks the Barracks with passive boosts and medic upgrades.'},
+  r_genroom:  {icon:'⚡',label:'Generator Room',  type:'room',cost:300, rk:'genroom', desc:'Opens the south-east wall. Unlocks the large Generator Room for income multipliers.'},
+  r_lab:      {icon:'🔬',label:'Research Lab',    type:'room',cost:500, rk:'lab',     desc:'Opens off the Generator corridor. Research Lab unlocks weapon mods and extended range.'},
+  r_market:   {icon:'🏪',label:'Black Market',    type:'room',cost:500, rk:'market',  desc:'Opens off the Generator corridor. Black Market has unique one-time power deals.'},
+
+  // BASE — hub upgrades
+  door:   {icon:'🚪',label:'Base Door',      type:'one',cost:100, desc:'Installs a lockable door on the south entrance. Walk near it and press E to toggle.'},
+  flood:  {icon:'💡',label:'Floodlights',    type:'one',cost:200, desc:'Bright lights around the hub. Enemies within 500px move at 45% speed. Does NOT stun permanently.'},
+  beacon: {icon:'📡',label:'Signal Beacon',  type:'one',cost:400, desc:'Broadcasts a distress signal. Supply drops bring +80💰 every 25 seconds.'},
+  medkit: {icon:'🩺',label:'Med Station',    type:'one',cost:300, desc:'A small medical bay. Passively regenerates +2 HP per second while you live here.'},
+  shield: {icon:'🛡️',label:'Barrier Shield', type:'one',cost:500, desc:'Energy barrier reduces all incoming enemy contact damage by a flat 15 points.'},
+  jammer: {icon:'📻',label:'Signal Jammer', type:'one',cost:600, desc:'Disrupts Boohbah navigation. Enemies near the base occasionally wander in wrong directions.'},
+
+  // PHIL — hub upgrades
+  music:  {icon:'🎵',label:'CD Player',      type:'one',cost:80,  desc:'Phil listens to his greatest hits. Permanently increases movement speed by +40.'},
+  boots:  {icon:'👟',label:'Speed Boots',    type:'mul',cost:150, costM:2.0,max:3,lv:0, desc:'High-grip alien footwear. Each level adds +25 movement speed.'},
+  suit:   {icon:'🥼',label:'Hazmat Suit',    type:'mul',cost:150, costM:2.2,max:3,lv:0, desc:'Protective layering. Each level adds +30 max HP.'},
+  weapon: {icon:'⚔️', label:'Weapon Upgrade', type:'mul',cost:80,  costM:3.0,max:3,lv:0, desc:'Fists → Drumstick → Mic Stand → Golden Kit. More damage and swing range per level.'},
+  aura:   {icon:'✨',label:'Damage Aura',    type:'one',cost:800, desc:'Phil emits a crackling energy field. Deals 15 DPS to all enemies within 100px automatically.'},
+  vampire:{icon:'🩸',label:'Vampire Fang',   type:'one',cost:600, desc:'Dark energy from the planet. Every enemy kill restores +8 HP. Great for horde situations.'},
+
+  // ARMORY
+  turret1:{icon:'🎯',label:'Turret Mk1',    type:'mul',cost:350, costM:2.8,max:4,lv:0, desc:'Auto-targeting turret. Each level increases damage and fire rate. Level 3+ spawns a second turret.'},
+  mines:  {icon:'💣',label:'Proximity Mines',type:'mul',cost:200, costM:2.2,max:3,lv:0, desc:'Explosive mines placed around the base perimeter. Each level adds 6 mines and bigger blasts.'},
+  wallup: {icon:'🧱',label:'Reinforce Walls',type:'mul',cost:120, costM:2.0,max:4,lv:0, desc:'Thicker, tougher walls. Enemies take much longer to navigate around your fortifications.'},
+
+  // BARRACKS
+  regen:  {icon:'💊',label:'Field Medic',    type:'mul',cost:200, costM:2.0,max:4,lv:0, desc:'A trained field medic on duty. Each level adds +1 HP/s passive regeneration.'},
+  rally:  {icon:'🚩',label:'Rally Point',    type:'one',cost:400, desc:'Morale boost. Phil earns +20% more money from every single enemy kill permanently.'},
+  stim:   {icon:'💉',label:'Stim Pack',      type:'one',cost:350, desc:'Chemical enhancers. Phil attacks 25% faster permanently. Irreversible.'},
+
+  // GENERATOR ROOM
+  genup:  {icon:'⚡',label:'Generator',      type:'mul',cost:300, costM:2.0,max:5,lv:0, desc:'Power up the generator. Each level adds +8/s to all passive income permanently.'},
+  overclock:{icon:'🔧',label:'Overclock',    type:'mul',cost:400, costM:2.5,max:3,lv:0, desc:'Push the generator past its limits. Each level adds +10% to total income/s.'},
+  beacon2:{icon:'🛰️',label:'Deep Space Beacon',type:'mul',cost:500,costM:2.0,max:3,lv:0, desc:'Long-range distress signal. Each level adds +50💰 per supply drop and cuts interval by 5s.'},
+
+  // LAB
+  scope:  {icon:'🔭',label:'Extended Range', type:'mul',cost:350, costM:2.2,max:3,lv:0, desc:'Optics upgrade for Phil. Each level adds +25 to melee weapon reach.'},
+  explosive:{icon:'💥',label:'Explosive Rounds',type:'mul',cost:600,costM:3.0,max:2,lv:0, desc:'Explosive tips on Phil\'s weapon. Each level adds AoE splash damage on every hit.'},
+  scanner:{icon:'📡',label:'Enemy Scanner',  type:'one',cost:450, desc:'Detects Boohbah heat signatures. Enemies are visible on the minimap from far away.'},
+
+  // MARKET
+  m_double:{icon:'💸',label:'Double Dip',    type:'one',cost:700, desc:'Mysterious deal. All existing passive income sources are permanently doubled from this moment.'},
+  m_loot:  {icon:'🎁',label:'Loot Magnet',   type:'mul',cost:300, costM:2.5,max:3,lv:0, desc:'Tuned loot attraction field. Each level adds +5💰 to every enemy kill reward.'},
+  m_rush:  {icon:'⚡',label:'Cash Rush',      type:'one',cost:500, desc:'Flash sale. Instantly receive +500💰 right now. One-time only.'},
+};
+
+const PAD={}; // id -> {x,y}  — set in makePads()
+
+// ── TOOLTIP STATE ──────────────────────────────────
+// tipBox is a fixed-height flex child — always in document flow, never overlaps anything.
+// showTip just swaps content; hideTip restores placeholder text.
+let hoverId=null;
+function showTip(id){
+  hoverId=id;
+  const u=UPG[id]; if(!u)return;
+  document.getElementById('tipEmpty').style.display='none';
+  document.getElementById('tipContent').style.display='block';
+  document.getElementById('tipTitle').textContent=u.icon+' '+u.label;
+  document.getElementById('tipDesc').textContent=u.desc;
+  const costEl=document.getElementById('tipCost');
+  if(u.type==='mul'&&u.lv<u.max){
+    costEl.textContent='Next: $'+getCost(id)+' → Lv'+(u.lv+1)+'/'+u.max;
+    costEl.style.display='block';
+  } else if(!u.bought&&u.type!=='mul'){
+    costEl.textContent='Cost: $'+u.cost;
+    costEl.style.display='block';
+  } else {
+    costEl.style.display='none';
+  }
+}
+function hideTip(){
+  hoverId=null;
+  document.getElementById('tipEmpty').style.display='block';
+  document.getElementById('tipContent').style.display='none';
+}
+
+// ── PAD PLACEMENT ──────────────────────────────────
+// All pads 160px apart minimum. Each room is large enough.
+// pl(id, x, y) places pad at world coords x,y.
+function makePads(){
+  function pl(id,x,y){PAD[id]={x,y};}
+
+  // ── HUB: INCOME PADS — 2 columns × 4 rows, 170px col spacing, 145px row spacing ──
+  // Placed in top-left quadrant of hub
+  const iIds=['i_scrap','i_moss','i_crystal','i_nest','i_star','i_plasma','i_dark','i_royalties'];
+  iIds.forEach((id,i)=>{
+    const col=i%2, row=Math.floor(i/2);
+    pl(id, HUB.x+130 + col*180, HUB.y+120 + row*150);
+  });
+
+  // ── HUB: ROOM UNLOCK PADS — 1 per wall, placed well inside, aligned to passage ──
+  pl('r_tower',    WINGS.tower.passX,        H_T + 100);
+  pl('r_armory',   H_R - 120,                WINGS.armory.passY);
+  pl('r_barracks', H_L + 120,                WINGS.barracks.passY);
+  pl('r_genroom',  WINGS.genroom.passX,      H_B - 120);
+
+  // ── HUB: BASE UPGRADE PADS — grid in hub right-centre ──
+  // 3 cols × 2 rows, 170px spacing
+  const baseIds=['door','flood','beacon','medkit','shield','jammer'];
+  baseIds.forEach((id,i)=>{
+    const col=i%3, row=Math.floor(i/3);
+    pl(id, H_R - 90 - col*175, H_B - 100 - row*165);
+  });
+
+  // ── HUB: PHIL PADS — centre strip of hub ──
+  pl('music',   HUB.x+HUB.w/2 - 170, HUB.y+HUB.h/2 + 30);
+  pl('boots',   HUB.x+HUB.w/2,       HUB.y+HUB.h/2 + 30);
+  pl('suit',    HUB.x+HUB.w/2 + 170, HUB.y+HUB.h/2 + 30);
+  pl('weapon',  HUB.x+HUB.w/2 - 170, HUB.y+HUB.h/2 + 190);
+  pl('aura',    HUB.x+HUB.w/2,       HUB.y+HUB.h/2 + 190);
+  pl('vampire', HUB.x+HUB.w/2 + 170, HUB.y+HUB.h/2 + 190);
+
+  // ── ARMORY: 3 pads, generous spacing across wide room ──
+  const A=WINGS.armory;
+  pl('turret1', A.x + 130,        A.y + A.h/2 - 80);
+  pl('mines',   A.x + 130,        A.y + A.h/2 + 80);
+  pl('wallup',  A.x + A.w - 130,  A.y + A.h/2);
+
+  // ── BARRACKS: 3 pads, tall room — stacked vertically ──
+  const B=WINGS.barracks;
+  pl('regen',   B.x + B.w/2,  B.y + 130);
+  pl('rally',   B.x + B.w/2,  B.y + 290);
+  pl('stim',    B.x + B.w/2,  B.y + 450);
+
+  // ── GENERATOR: 3 pads spread across enormous room ──
+  const G=WINGS.genroom;
+  pl('genup',    G.x + 130,       G.y + G.h/2);
+  pl('overclock',G.x + G.w/2,     G.y + G.h/2);
+  pl('beacon2',  G.x + G.w - 130, G.y + G.h/2);
+
+  // ── LAB unlock pad inside genroom ──
+  pl('r_lab',   G.x + G.w - 80,  G.y + G.h/2 + 120);
+  // ── MARKET unlock pad inside genroom ──
+  pl('r_market',G.x + 80,         G.y + G.h/2 + 120);
+
+  // ── LAB: 3 pads in tall-ish room ──
+  const L=WINGS.lab;
+  pl('scope',    L.x + L.w/2,  L.y + 110);
+  pl('explosive',L.x + L.w/2,  L.y + 270);
+  pl('scanner',  L.x + L.w/2,  L.y + 430);  // may clip if room too short — clamped fine
+
+  // ── MARKET: 3 pads spread horizontally ──
+  const M=WINGS.market;
+  pl('m_double', M.x + 110,       M.y + M.h/2);
+  pl('m_loot',   M.x + M.w/2,     M.y + M.h/2);
+  pl('m_rush',   M.x + M.w - 110, M.y + M.h/2);
+}
+
+// ── HELPERS ────────────────────────────────────────
+function getCost(id){const u=UPG[id];return u.type==='mul'?Math.round(u.cost*Math.pow(u.costM,u.lv)):u.cost;}
+function canBuy(id){const u=UPG[id];if(!u)return false;if(u.type==='mul')return u.lv<u.max;return !u.bought;}
+function isVisible(id){
+  if(['turret1','mines','wallup'].includes(id))         return OPEN.armory;
+  if(['regen','rally','stim'].includes(id))             return OPEN.barracks;
+  if(['genup','overclock','beacon2'].includes(id))      return OPEN.genroom;
+  if(['scope','explosive','scanner'].includes(id))      return OPEN.lab;
+  if(['m_double','m_loot','m_rush'].includes(id))       return OPEN.market;
+  if(id==='r_lab'||id==='r_market')                     return OPEN.genroom;
+  return true;
+}
+function aabb(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
+
+// ── WALL BUILDER ───────────────────────────────────
+function buildWalls(){
+  walls=[];doors=[];
+  function hw(x,y,w,gCX){
+    if(gCX==null){walls.push({x,y,w,h:WT});return;}
+    const g0=gCX-GAP/2,g1=gCX+GAP/2;
+    if(g0>x)  walls.push({x,y,w:g0-x,h:WT});
+    if(g1<x+w)walls.push({x:g1,y,w:(x+w)-g1,h:WT});
+  }
+  function vw(x,y,h,gCY){
+    if(gCY==null){walls.push({x,y,w:WT,h});return;}
+    const g0=gCY-GAP/2,g1=gCY+GAP/2;
+    if(g0>y)  walls.push({x,y,w:WT,h:g0-y});
+    if(g1<y+h)walls.push({x,y:g1,w:WT,h:(y+h)-g1});
+  }
+  function box(r,gaps={}){
+    const{x,y,w,h}=r;
+    hw(x-WT,y-WT,   w+WT*2, gaps.top   ??null);
+    hw(x-WT,y+h,    w+WT*2, gaps.bot   ??null);
+    vw(x-WT,y-WT,   h+WT*2, gaps.left  ??null);
+    vw(x+w, y-WT,   h+WT*2, gaps.right ??null);
+  }
+
+  // HUB walls — south always open at CX (player entrance)
+  // If genroom is open, cut the genroom passage too (different X from CX)
+  const tWing=WINGS.tower, aWing=WINGS.armory, bWing=WINGS.barracks, gWing=WINGS.genroom;
+
+  // Build hub top/left/right normally
+  hw(H_L-WT, H_T-WT, HUB.w+WT*2, OPEN.tower    ? tWing.passX : null);   // top
+  vw(H_R,    H_T-WT, HUB.h+WT*2, OPEN.armory   ? aWing.passY : null);   // right
+  vw(H_L-WT, H_T-WT, HUB.h+WT*2, OPEN.barracks ? bWing.passY : null);   // left
+
+  // Hub bottom: always-open at CX, plus genroom gap if open (different position)
+  if(!OPEN.genroom){
+    hw(H_L-WT, H_B, HUB.w+WT*2, CX);   // just the player entrance
+  } else {
+    // Both gaps: CX (player entrance) and gWing.passX (genroom passage)
+    // Build bottom wall with two gaps: sort them left-to-right
+    const gaps=[CX, gWing.passX].sort((a,b)=>a-b);
+    const g0a=gaps[0]-GAP/2, g0b=gaps[0]+GAP/2;
+    const g1a=gaps[1]-GAP/2, g1b=gaps[1]+GAP/2;
+    const rx=H_L-WT, ry=H_B, rw=HUB.w+WT*2;
+    if(g0a>rx)          walls.push({x:rx,  y:ry, w:g0a-rx,       h:WT});
+    if(g1a>g0b)         walls.push({x:g0b, y:ry, w:g1a-g0b,      h:WT});
+    if(g1b<rx+rw)       walls.push({x:g1b, y:ry, w:(rx+rw)-g1b,  h:WT});
+  }
+
+  if(UPG.door.bought)
+    doors.push({x:CX-GAP/2, y:H_B, w:GAP, h:WT, open:false});
+
+  // WINGS
+  if(OPEN.tower)    box(WINGS.tower,    {bot:  tWing.passX});
+  if(OPEN.armory)   box(WINGS.armory,   {left: aWing.passY});
+  if(OPEN.barracks) box(WINGS.barracks, {right:bWing.passY});
+  if(OPEN.genroom){
+    box(WINGS.genroom, {
+      top:   gWing.passX,
+      right: OPEN.lab    ? WINGS.lab.passY    : null,
+      left:  OPEN.market ? WINGS.market.passY : null,
+    });
+  }
+  if(OPEN.lab)    box(WINGS.lab,    {left:  WINGS.lab.passY});
+  if(OPEN.market) box(WINGS.market, {right: WINGS.market.passY});
+}
+
+// ── MINES ──────────────────────────────────────────
+function rebuildMines(){
+  mines=[];
+  const lv=UPG.mines.lv; if(!lv)return;
+  const count=lv*6, r=900+lv*100;
+  for(let i=0;i<count;i++){
+    const a=(i/count)*Math.PI*2;
+    mines.push({x:CX+Math.cos(a)*r,y:CY+Math.sin(a)*r,alive:true,blink:Math.random()*Math.PI*2});
+  }
+}
+
+// ── TURRETS ────────────────────────────────────────
+function rebuildTurrets(){
+  turrets=[];
+  const lv=UPG.turret1.lv; if(!lv||!OPEN.armory)return;
+  const A=WINGS.armory;
+  turrets.push({x:A.x+100,y:A.y+A.h/2,t:0,angle:0,range:300+lv*80,dmg:20+lv*16,bRate:0.8+lv*0.35});
+  if(lv>=3)
+    turrets.push({x:A.x+260,y:A.y+A.h/2-80,t:0.4,angle:0,range:280+lv*60,dmg:16+lv*12,bRate:0.7+lv*0.3});
+}
+
+// ── BUY ────────────────────────────────────────────
+function tryBuy(id){
+  const u=UPG[id]; if(!u||!canBuy(id))return;
+  const cost=getCost(id);
+  if(money<cost){showMsg('💸 Need $'+cost+' for '+u.label);return;}
+  money-=cost;
+  const pos=PAD[id];
+  if(u.type==='inc'){
+    u.bought=true;
+    let iv=u.iv; if(UPG.m_double.bought)iv*=2;
+    income+=iv;
+    showMsg('💰 '+u.label+' +'+iv+'/s!');
+  } else if(u.type==='room'){
+    u.bought=true; OPEN[u.rk]=true; buildWalls();
+    showMsg('🏠 '+u.label+' — wing unlocked!');
+  } else if(u.type==='one'){
+    u.bought=true; applyOne(id);
+  } else if(u.type==='mul'){
+    u.lv++; applyMul(id);
+    showMsg(u.icon+' '+u.label+(u.lv>=u.max?' — MAXED!':`  Lv${u.lv}/${u.max}`));
+  }
+  if(pos)spawnPfx(pos.x-camX,pos.y-camY,'#ffe566',18);
+  document.getElementById('sIncome').textContent=income.toFixed(1);
+  document.getElementById('sMaxHp').textContent=P.maxHp;
+  updPanel(); updPassivesHUD();
+}
+
+function applyOne(id){
+  if(id==='door')   {buildWalls();showMsg('🚪 Door installed!');}
+  if(id==='flood')  {showMsg('💡 Floodlights on — enemies slowed near hub!');}
+  if(id==='beacon') {showMsg('📡 Beacon online! +80💰 every 25s');}
+  if(id==='medkit') {P.regen+=2;showMsg('🩺 +2 HP/s regen active!');}
+  if(id==='shield') {P.armor+=15;showMsg('🛡️ Armor +15!');}
+  if(id==='jammer') {showMsg('📻 Jammer active — enemies confused!');}
+  if(id==='music')  {P.speed+=40;showMsg('🎵 Speed +40!');}
+  if(id==='aura')   {P.aura=true;P.auraR=100;showMsg('✨ Damage Aura activated!');}
+  if(id==='vampire'){P.vampR=8;showMsg('🩸 Vampire Fang — kills heal +8 HP!');}
+  if(id==='rally')  {showMsg('🚩 Rally Point — kill rewards +20%!');}
+  if(id==='stim')   {WPN.cd*=0.75;showMsg('💉 Attack speed +25%!');}
+  if(id==='scanner'){showMsg('📡 Enemy Scanner active!');}
+  if(id==='m_double'){
+    income=1;
+    for(const k in UPG){const u=UPG[k];if(u.type==='inc'&&u.bought)income+=u.iv*2;}
+    showMsg('💸 All income DOUBLED!');
+    document.getElementById('sIncome').textContent=income.toFixed(1);
+  }
+  if(id==='m_rush'){money+=500;showMsg('⚡ Cash Rush! +500💰');}
+}
+function applyMul(id){
+  const u=UPG[id];
+  if(id==='boots')  {P.speed+=25;}
+  if(id==='suit')   {P.maxHp+=30;P.hp=Math.min(P.hp+30,P.maxHp);}
+  if(id==='weapon') {WPN.lv=u.lv;WPN.dmg=20+u.lv*20;WPN.range=75+u.lv*22;WPN.cd=Math.max(0.2,0.45-u.lv*0.07);document.getElementById('sWeapon').textContent=WPN.names[u.lv];}
+  if(id==='turret1'){rebuildTurrets();}
+  if(id==='mines')  {rebuildMines();}
+  if(id==='regen')  {P.regen+=1;}
+  if(id==='genup')  {income+=8;}
+  if(id==='overclock'){income*=1.1;showMsg('🔧 Income ×1.1!');}
+  if(id==='scope')  {WPN.range+=25;}
+  if(id==='m_loot') {}
+}
+function updPassivesHUD(){
+  const p=[];
+  if(P.regen>0)p.push('+'+P.regen+' HP/s');
+  if(P.armor>0)p.push(P.armor+' armor');
+  if(P.aura)p.push('✨ aura');
+  if(P.vampR>0)p.push('🩸 vamp');
+  if(UPG.jammer.bought)p.push('📻 jam');
+  document.getElementById('sPassives').textContent=p.join('  ');
+}
+
+// ── TERRAIN ────────────────────────────────────────
+const TSEED=Math.random()*9999|0;
+function tileCol(tx,ty){
+  const v=Math.abs(Math.sin(tx*127.1+ty*311.7+TSEED)*43758.5%1);
+  return v<.04?'#5522aa':v<.12?'#9955dd':v<.52?'#7744bb':v<.74?'#8833cc':'#6633aa';
+}
+const TFEATS=[];
+function genTerrain(){
+  for(let i=0;i<260;i++){
+    const r=Math.random();
+    TFEATS.push({x:Math.random()*WW,y:Math.random()*WH,
+      type:r<.4?'rock':r<.7?'xtal':'egg',
+      size:10+Math.random()*26,color:r<.4?'#554488':r<.7?'#cc44ff':'#ffaacc',
+      angle:Math.random()*Math.PI*2});
+  }
+}
+
+// ── COMBAT ─────────────────────────────────────────
+function doSwing(){
+  if(!running||WPN.t>0)return;
+  const pcx=P.x+P.w/2-camX,pcy=P.y+P.h/2-camY;
+  const a=Math.atan2(mouse.y-pcy,mouse.x-pcx);
+  WPN.swA=a;WPN.sw=true;WPN.swT=WPN.swDur;WPN.t=WPN.cd;
+  const wx=P.x+P.w/2,wy=P.y+P.h/2,arc=Math.PI*.45;
+  const splashLv=UPG.explosive.lv;
+  for(let i=enemies.length-1;i>=0;i--){
+    const e=enemies[i];
+    const ex=e.x+e.w/2,ey=e.y+e.h/2,dx=ex-wx,dy=ey-wy,d=Math.hypot(dx,dy);
+    if(d>WPN.range)continue;
+    let ad=Math.atan2(dy,dx)-a;
+    while(ad>Math.PI)ad-=Math.PI*2;while(ad<-Math.PI)ad+=Math.PI*2;
+    if(Math.abs(ad)>arc)continue;
+    e.hp-=WPN.dmg;e.x+=(dx/d)*18;e.y+=(dy/d)*18;e.st=.25;
+    spawnPfx(ex-camX,ey-camY,e.col,7);
+    if(splashLv>0){
+      const sr=50+splashLv*30,sd=WPN.dmg*.4*splashLv;
+      splashPfx.push({x:ex-camX,y:ey-camY,r:0,maxR:sr,t:.3,maxT:.3});
+      for(let j=enemies.length-1;j>=0;j--){
+        if(j===i)continue;
+        const e2=enemies[j];
+        if(Math.hypot(e2.x+e2.w/2-ex,e2.y+e2.h/2-ey)<sr){e2.hp-=sd;e2.st=.15;}
+      }
+    }
+    if(e.hp<=0)killEnemy(i,e);
+  }
+}
+function killEnemy(i,e){
+  let r=5+WPN.lv*2+UPG.m_loot.lv*5;
+  if(UPG.rally.bought)r=Math.floor(r*1.2);
+  money+=r;
+  if(P.vampR>0)P.hp=Math.min(P.maxHp,P.hp+P.vampR);
+  spawnPfx(e.x+e.w/2-camX,e.y+e.h/2-camY,e.col,14);
+  enemies.splice(i,1);
+}
+
+// ── ENEMIES ────────────────────────────────────────
+let eT=0,eRate=8,eDiff=1;
+const ECOLS=['#ff44aa','#ff8844','#aa44ff','#44ffcc','#ff4444','#ffdd44'];
+function spawnEnemy(){
+  const s=Math.random()*4|0;
+  let ex,ey;
+  if(s===0){ex=Math.random()*WW;ey=0;}
+  else if(s===1){ex=WW;ey=Math.random()*WH;}
+  else if(s===2){ex=Math.random()*WW;ey=WH;}
+  else{ex=0;ey=Math.random()*WH;}
+  const big=eDiff>2&&Math.random()<.2;
+  enemies.push({x:ex,y:ey,w:big?36:22,h:big?36:22,
+    speed:(big?28:45)+Math.random()*28*eDiff,
+    hp:(big?120:30)*eDiff,maxHp:(big?120:30)*eDiff,
+    col:ECOLS[Math.random()*ECOLS.length|0],wob:Math.random()*6.28,st:0,jamT:0,big});
+}
+function updEnemies(dt){
+  eT+=dt;
+  if(eT>=eRate){eT=0;spawnEnemy();if(eRate>1.5)eRate-=0.06;eDiff=Math.min(eDiff+.04,8);}
+  const jam=UPG.jammer.bought,flood=UPG.flood.bought;
+  for(let i=enemies.length-1;i>=0;i--){
+    const e=enemies[i];
+    e._slow=flood&&Math.hypot(e.x-CX,e.y-CY)<500;
+    if(jam){
+      e.jamT-=dt;
+      if(e.jamT<=0){e.jamT=2+Math.random()*3;e._jamA=Math.atan2(P.y-e.y,P.x-e.x)+(Math.random()-.5)*Math.PI*1.2;}
+    }
+    if(e.st>0){e.st-=dt;e.wob+=dt*3;continue;}
+    e.wob+=dt*3;
+    const spd=e.speed*(e._slow?.45:1);
+    const ang=(jam&&e._jamA!=null)?e._jamA:Math.atan2(P.y-e.y,P.x-e.x);
+    const nx=e.x+Math.cos(ang)*spd*dt,ny=e.y+Math.sin(ang)*spd*dt;
+    let bx=false,by=false;
+    for(const w of walls){
+      if(aabb({x:nx,y:e.y,w:e.w,h:e.h},w))bx=true;
+      if(aabb({x:e.x,y:ny,w:e.w,h:e.h},w))by=true;
+    }
+    if(!bx)e.x=nx;if(!by)e.y=ny;
+    if(aabb(e,P)){
+      let dmg=8*dt;if(P.armor>0)dmg=Math.max(0,(8-P.armor*.1)*dt);
+      P.hp-=dmg;if(P.hp<0)P.hp=0;
+      spawnPfx(P.x-camX,P.y-camY,'#ff4444',2);
+    }
+    for(let m=mines.length-1;m>=0;m--){
+      const mn=mines[m];if(!mn.alive)continue;
+      if(Math.hypot(e.x+e.w/2-mn.x,e.y+e.h/2-mn.y)<42){
+        mn.alive=false;spawnPfx(mn.x-camX,mn.y-camY,'#ff8800',24);
+        for(let j=enemies.length-1;j>=0;j--){
+          const e2=enemies[j];
+          if(Math.hypot(e2.x+e2.w/2-mn.x,e2.y+e2.h/2-mn.y)<95){
+            e2.hp-=65+UPG.mines.lv*30;if(e2.hp<=0)killEnemy(j,e2);
+          }
+        }
+        break;
+      }
+    }
+    if(P.aura&&Math.hypot(e.x+e.w/2-P.x-P.w/2,e.y+e.h/2-P.y-P.h/2)<P.auraR){
+      e.hp-=15*dt;if(e.hp<=0)killEnemy(i,e);
+    }
+  }
+  // Turrets
+  turrets.forEach(tu=>{
+    if(!OPEN.armory)return;
+    tu.t-=dt;
+    let tgt=null,td=tu.range;
+    for(const e of enemies){const d=Math.hypot(e.x+e.w/2-tu.x,e.y+e.h/2-tu.y);if(d<td){tgt=e;td=d;}}
+    if(!tgt){tu.angle+=dt*1.2;return;}
+    tu.angle=Math.atan2(tgt.y+tgt.h/2-tu.y,tgt.x+tgt.w/2-tu.x);
+    if(tu.t<=0){
+      tu.t=1/tu.bRate;
+      bullets.push({x:tu.x,y:tu.y,vx:Math.cos(tu.angle)*540,vy:Math.sin(tu.angle)*540,dmg:tu.dmg,life:.65,col:'#ff8844'});
+    }
+  });
+  for(let i=bullets.length-1;i>=0;i--){
+    const b=bullets[i];b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;
+    if(b.life<=0){bullets.splice(i,1);continue;}
+    let hit=false;
+    for(const w of walls){if(aabb({x:b.x-4,y:b.y-4,w:8,h:8},w)){hit=true;break;}}
+    if(hit){bullets.splice(i,1);continue;}
+    for(let j=enemies.length-1;j>=0;j--){
+      const e=enemies[j];
+      if(aabb({x:b.x-5,y:b.y-5,w:10,h:10},e)){
+        e.hp-=b.dmg;spawnPfx(b.x-camX,b.y-camY,'#ff8844',5);
+        if(e.hp<=0)killEnemy(j,e);bullets.splice(i,1);hit=true;break;
+      }
+    }
+  }
+}
+
+// ── PARTICLES ──────────────────────────────────────
+function spawnPfx(sx,sy,col,n){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*6.28,sp=55+Math.random()*90;
+    pfx.push({x:sx,y:sy,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:.5+Math.random()*.4,maxL:.7,col,r:2+Math.random()*3});
+  }
+}
+function updPfx(dt){
+  for(let i=pfx.length-1;i>=0;i--){const p=pfx[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=.87;p.vy*=.87;p.life-=dt;if(p.life<=0)pfx.splice(i,1);}
+  for(let i=splashPfx.length-1;i>=0;i--){const s=splashPfx[i];s.t-=dt;s.r=s.maxR*(1-s.t/s.maxT);if(s.t<=0)splashPfx.splice(i,1);}
+}
+
+// ── PLAYER UPDATE ──────────────────────────────────
+function updPlayer(dt){
+  if(WPN.t>0)WPN.t-=dt;
+  if(WPN.swT>0){WPN.swT-=dt;}else{WPN.sw=false;}
+  if(P.regen>0)P.hp=Math.min(P.maxHp,P.hp+P.regen*dt);
+  let mx=0,my=0;
+  if(K['w']||K['W']||K['ArrowUp'])   my-=1;
+  if(K['s']||K['S']||K['ArrowDown']) my+=1;
+  if(K['a']||K['A']||K['ArrowLeft']) mx-=1;
+  if(K['d']||K['D']||K['ArrowRight'])mx+=1;
+  const ln=Math.hypot(mx,my);if(ln>0){mx/=ln;my/=ln;}
+  const nx=Math.max(0,Math.min(WW-P.w,P.x+mx*P.speed*dt));
+  const ny=Math.max(0,Math.min(WH-P.h,P.y+my*P.speed*dt));
+  let bx=false,by=false;
+  for(const w of walls){
+    if(aabb({x:nx,y:P.y,w:P.w,h:P.h},w))bx=true;
+    if(aabb({x:P.x,y:ny,w:P.w,h:P.h},w))by=true;
+  }
+  for(const d of doors){
+    if(d.open){
+      if(aabb({x:nx,y:P.y,w:P.w,h:P.h},d))bx=false;
+      if(aabb({x:P.x,y:ny,w:P.w,h:P.h},d))by=false;
+    }
+  }
+  if(!bx)P.x=nx;if(!by)P.y=ny;
+  if(K['e']||K['E']){
+    K['e']=false;K['E']=false;
+    for(const d of doors){
+      if(Math.hypot(d.x+d.w/2-P.x-P.w/2,d.y+d.h/2-P.y-P.h/2)<80){d.open=!d.open;showMsg(d.open?'🚪 Open':'🔒 Locked');break;}
+    }
+    let bestId=null,bestD=70;
+    for(const id in PAD){
+      if(!canBuy(id)||!isVisible(id))continue;
+      const p=PAD[id],d=Math.hypot(p.x-P.x-P.w/2,p.y-P.y-P.h/2);
+      if(d<bestD){bestId=id;bestD=d;}
+    }
+    if(bestId)tryBuy(bestId);
+  }
+}
+function updCam(){
+  const tx=P.x+P.w/2-cvs.width/2,ty=P.y+P.h/2-cvs.height/2;
+  camX+=(tx-camX)*.12;camY+=(ty-camY)*.12;
+  camX=Math.max(0,Math.min(WW-cvs.width,camX));
+  camY=Math.max(0,Math.min(WH-cvs.height,camY));
+}
+function updBeacon(dt){
+  if(!UPG.beacon.bought&&!UPG.beacon2.lv)return;
+  beaconT+=dt;
+  let interval=UPG.beacon.bought?25:999;
+  let reward=UPG.beacon.bought?80:0;
+  const lv2=UPG.beacon2.lv;
+  if(lv2>0){interval=Math.max(10,25-lv2*5);reward+=50*lv2;}
+  if(beaconT>=interval){beaconT=0;money+=reward;showMsg('📦 Supply drop! +'+reward+'💰');}
+}
+
+// ── DRAW ───────────────────────────────────────────
+function drawFloor(r,col){
+  ctx.fillStyle=col;ctx.fillRect(r.x,r.y,r.w,r.h);
+  ctx.strokeStyle='rgba(130,65,200,0.07)';ctx.lineWidth=1;
+  for(let gx=r.x;gx<=r.x+r.w;gx+=TILE){ctx.beginPath();ctx.moveTo(gx,r.y);ctx.lineTo(gx,r.y+r.h);ctx.stroke();}
+  for(let gy=r.y;gy<=r.y+r.h;gy+=TILE){ctx.beginPath();ctx.moveTo(r.x,gy);ctx.lineTo(r.x+r.w,gy);ctx.stroke();}
+}
+function drawGhost(r){
+  ctx.globalAlpha=.08;ctx.fillStyle='#7744bb';ctx.fillRect(r.x,r.y,r.w,r.h);
+  ctx.globalAlpha=.22;ctx.strokeStyle='#553366';ctx.lineWidth=1;
+  ctx.setLineDash([5,8]);ctx.strokeRect(r.x,r.y,r.w,r.h);ctx.setLineDash([]);ctx.globalAlpha=1;
+}
+function label(r,txt){
+  ctx.fillStyle='rgba(255,255,255,0.05)';ctx.font='18px VT323';ctx.textAlign='center';
+  ctx.fillText(txt,r.x+r.w/2,r.y+20);
+}
+function corrFloor(ax,ay,bx,by,horiz){
+  // floor strip between two rooms
+  if(horiz){ctx.fillStyle='#100820';ctx.fillRect(ax,ay-GAP/2,bx-ax,GAP);}
+  else{ctx.fillStyle='#100820';ctx.fillRect(ax-GAP/2,ay,GAP,by-ay);}
+}
+
+function draw(){
+  const sg=ctx.createRadialGradient(cvs.width/2,cvs.height/2,0,cvs.width/2,cvs.height/2,cvs.width);
+  sg.addColorStop(0,'#1a0a3a');sg.addColorStop(1,'#050510');
+  ctx.fillStyle=sg;ctx.fillRect(0,0,cvs.width,cvs.height);
+  ctx.save();ctx.translate(-camX,-camY);
+
+  // Tiles
+  const stx=Math.max(0,camX/TILE|0),sty=Math.max(0,camY/TILE|0);
+  const etx=Math.min(WW/TILE,(camX+cvs.width)/TILE+2)|0;
+  const ety=Math.min(WH/TILE,(camY+cvs.height)/TILE+2)|0;
+  for(let ty=sty;ty<ety;ty++)for(let tx=stx;tx<etx;tx++){
+    ctx.fillStyle=tileCol(tx,ty);ctx.fillRect(tx*TILE,ty*TILE,TILE,TILE);
+  }
+  ctx.strokeStyle='#aa44ff';ctx.lineWidth=6;ctx.strokeRect(3,3,WW-6,WH-6);
+
+  // Terrain
+  TFEATS.forEach(f=>{
+    const fx=f.x-camX;if(fx<-50||fx>cvs.width+50)return;
+    ctx.fillStyle=f.color;
+    if(f.type==='rock'){ctx.beginPath();ctx.ellipse(f.x,f.y,f.size,f.size*.7,f.angle,0,Math.PI*2);ctx.fill();}
+    else if(f.type==='xtal'){ctx.save();ctx.translate(f.x,f.y);ctx.rotate(f.angle);ctx.beginPath();ctx.moveTo(0,-f.size);ctx.lineTo(f.size*.4,0);ctx.lineTo(0,f.size*.5);ctx.lineTo(-f.size*.4,0);ctx.closePath();ctx.fill();ctx.restore();}
+    else{ctx.beginPath();ctx.ellipse(f.x,f.y,f.size*.7,f.size,0,0,Math.PI*2);ctx.fill();}
+  });
+
+  // Corridor floors — draw gap-width floor strip between hub edge and wing face
+  const W=WINGS;
+  if(OPEN.tower){
+    // vertical strip from top of tower to top of hub
+    ctx.fillStyle='#100820';
+    ctx.fillRect(W.tower.passX-GAP/2, W.tower.y+W.tower.h, GAP, H_T-(W.tower.y+W.tower.h));
+  }
+  if(OPEN.armory){
+    // horizontal strip from right of hub to left of armory
+    ctx.fillStyle='#120808';
+    ctx.fillRect(H_R, W.armory.passY-GAP/2, W.armory.x-H_R, GAP);
+  }
+  if(OPEN.barracks){
+    // horizontal strip from right of barracks to left of hub
+    ctx.fillStyle='#081208';
+    ctx.fillRect(W.barracks.x+W.barracks.w, W.barracks.passY-GAP/2, H_L-(W.barracks.x+W.barracks.w), GAP);
+  }
+  if(OPEN.genroom){
+    // vertical strip from bottom of hub to top of genroom
+    ctx.fillStyle='#081008';
+    ctx.fillRect(W.genroom.passX-GAP/2, H_B, GAP, W.genroom.y-H_B);
+  }
+  if(OPEN.lab){
+    // horizontal strip from right of genroom to left of lab
+    const G=W.genroom,L=W.lab;
+    ctx.fillStyle='#0c0804';
+    ctx.fillRect(G.x+G.w, L.passY-GAP/2, L.x-(G.x+G.w), GAP);
+  }
+  if(OPEN.market){
+    // horizontal strip from right of market to left of genroom
+    const G=W.genroom,M=W.market;
+    ctx.fillStyle='#04080c';
+    ctx.fillRect(M.x+M.w, M.passY-GAP/2, G.x-(M.x+M.w), GAP);
+  }
+
+  // Room floors
+  drawFloor(HUB,'#1e0e30');label(HUB,'Main Hub');
+  if(OPEN.tower)    {drawFloor(W.tower,'#080e18');   label(W.tower,'Watch Tower');}
+  if(OPEN.armory)   {drawFloor(W.armory,'#1a0a08');  label(W.armory,'Armory');}
+  if(OPEN.barracks) {drawFloor(W.barracks,'#081a18');label(W.barracks,'Barracks');}
+  if(OPEN.genroom)  {drawFloor(W.genroom,'#0e1a0e'); label(W.genroom,'Generator Room');}
+  if(OPEN.lab)      {drawFloor(W.lab,'#1a1008');     label(W.lab,'Research Lab');}
+  if(OPEN.market)   {drawFloor(W.market,'#0a0e1a');  label(W.market,'Black Market');}
+
+  if(!OPEN.tower)    drawGhost(W.tower);
+  if(!OPEN.armory)   drawGhost(W.armory);
+  if(!OPEN.barracks) drawGhost(W.barracks);
+  if(!OPEN.genroom)  drawGhost(W.genroom);
+  if(!OPEN.lab)      drawGhost(W.lab);
+  if(!OPEN.market)   drawGhost(W.market);
+
+  if(UPG.flood.bought){
+    const fg=ctx.createRadialGradient(CX,CY,50,CX,CY,540);
+    fg.addColorStop(0,'rgba(255,255,180,0.05)');fg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=fg;ctx.beginPath();ctx.arc(CX,CY,540,0,Math.PI*2);ctx.fill();
+  }
+
+  // Walls
+  const wc=UPG.wallup.lv>0?'#aa66ff':'#7744cc';
+  walls.forEach(w=>{ctx.fillStyle=wc;ctx.fillRect(w.x,w.y,w.w,w.h);ctx.strokeStyle='#cc99ff';ctx.lineWidth=1;ctx.strokeRect(w.x,w.y,w.w,w.h);});
+
+  // Doors
+  doors.forEach(d=>{
+    ctx.fillStyle=d.open?'rgba(68,170,255,0.14)':'#152050';ctx.fillRect(d.x,d.y,d.w,d.h);
+    ctx.strokeStyle='#44aaff';ctx.lineWidth=2;ctx.strokeRect(d.x,d.y,d.w,d.h);
+    ctx.fillStyle='#88ccff';ctx.font='11px VT323';ctx.textAlign='center';
+    ctx.fillText(d.open?'OPEN':'[E] DOOR',d.x+d.w/2,d.y-4);
+  });
+
+  // Mines
+  mines.forEach(m=>{
+    if(!m.alive)return;
+    m.blink+=0.05;
+    const pulse=.5+.5*Math.sin(m.blink);
+    ctx.globalAlpha=.5+pulse*.5;ctx.fillStyle='#ff6600';
+    ctx.beginPath();ctx.arc(m.x,m.y,8,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#ffaa44';ctx.lineWidth=1;ctx.stroke();ctx.globalAlpha=1;
+  });
+
+  // Turrets
+  turrets.forEach(tu=>{
+    if(!OPEN.armory)return;
+    ctx.strokeStyle='rgba(255,80,60,0.12)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(tu.x,tu.y,tu.range,0,Math.PI*2);ctx.stroke();
+    ctx.fillStyle='#3a1522';ctx.beginPath();ctx.arc(tu.x,tu.y,22,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#cc4444';ctx.lineWidth=2;ctx.stroke();
+    ctx.fillStyle='#882233';ctx.beginPath();ctx.arc(tu.x,tu.y,10,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#ff7755';ctx.lineWidth=7;
+    ctx.beginPath();ctx.moveTo(tu.x,tu.y);ctx.lineTo(tu.x+Math.cos(tu.angle)*30,tu.y+Math.sin(tu.angle)*30);ctx.stroke();
+    ctx.fillStyle='#ff9977';ctx.font='bold 12px VT323';ctx.textAlign='center';ctx.fillText('Lv'+UPG.turret1.lv,tu.x,tu.y+38);
+  });
+
+  // Bullets
+  bullets.forEach(b=>{ctx.fillStyle=b.col;ctx.globalAlpha=Math.min(1,b.life*2);ctx.beginPath();ctx.arc(b.x-camX,b.y-camY,4,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;});
+
+  // Beacon
+  if(UPG.beacon.bought||UPG.beacon2.lv>0){
+    const bx=HUB.x+HUB.w-70,by=HUB.y+60;
+    ctx.strokeStyle='#44ff88';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(bx,by-34);ctx.stroke();
+    const pulse=(Date.now()%1500)/1500;
+    ctx.strokeStyle=`rgba(68,255,136,${1-pulse})`;ctx.lineWidth=1;ctx.beginPath();ctx.arc(bx,by-34,pulse*28,0,Math.PI*2);ctx.stroke();
+  }
+
+  // Generator
+  if(UPG.genup.lv>0&&OPEN.genroom){
+    const G=W.genroom,gx=G.x+80,gy=G.y+G.h/2;
+    ctx.fillStyle='#1a3a1a';ctx.fillRect(gx-18,gy-18,36,36);
+    ctx.font='22px serif';ctx.textAlign='center';ctx.fillText('⚡',gx,gy+8);
+    ctx.fillStyle='#88ff88';ctx.font='11px VT323';ctx.fillText('Lv'+UPG.genup.lv,gx,gy+26);
+  }
+
+  // Aura
+  if(P.aura){
+    const ag=ctx.createRadialGradient(P.x+P.w/2,P.y+P.h/2,0,P.x+P.w/2,P.y+P.h/2,P.auraR);
+    ag.addColorStop(0,'rgba(255,220,80,.22)');ag.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=ag;ctx.beginPath();ctx.arc(P.x+P.w/2,P.y+P.h/2,P.auraR,0,Math.PI*2);ctx.fill();
+  }
+
+  // Splash
+  splashPfx.forEach(s=>{
+    ctx.globalAlpha=(s.t/s.maxT)*.4;ctx.strokeStyle='#ff8800';ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(s.x+camX,s.y+camY,s.r,0,Math.PI*2);ctx.stroke();ctx.globalAlpha=1;
+  });
+
+  // ── PADS ──────────────────────────────────────────
+  const now=Date.now(),ppx=P.x+P.w/2,ppy=P.y+P.h/2;
+  // Track nearest pad for in-world info popup
+  let nearestId=null,nearestDist=9999;
+  for(const id in PAD){
+    if(!canBuy(id)||!isVisible(id))continue;
+    const p=PAD[id],d=Math.hypot(p.x-ppx,p.y-ppy);
+    if(d<nearestDist){nearestId=id;nearestDist=d;}
+  }
+
+  for(const id in PAD){
+    if(!canBuy(id)||!isVisible(id))continue;
+    const u=UPG[id];if(!u)continue;
+    const pos=PAD[id];
+    const dist=Math.hypot(pos.x-ppx,pos.y-ppy);
+    const near=dist<70;
+    const aff=money>=getCost(id);
+    const pulse=.55+.45*Math.sin(now/360+pos.x*.009);
+    const PAD_R=28; // pad radius — larger than before
+
+    // outer glow
+    ctx.globalAlpha=pulse*.3;
+    ctx.fillStyle=near?'#ffffff':aff?'#9966ff':'#441133';
+    ctx.beginPath();ctx.arc(pos.x,pos.y,PAD_R+10,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+
+    // pad body
+    ctx.fillStyle=aff?(near?'#2a1055':'rgba(26,12,50,.96)'):'rgba(18,8,32,.96)';
+    ctx.beginPath();ctx.arc(pos.x,pos.y,PAD_R,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle=near?'#ffffff':(aff?'#8855cc':'#442266');
+    ctx.lineWidth=near?3.5:2;ctx.stroke();
+
+    // icon
+    ctx.font='18px serif';ctx.textAlign='center';
+    ctx.fillStyle=aff?'#fff':'#554466';
+    ctx.fillText(u.icon,pos.x,pos.y+6);
+
+    // cost below pad
+    ctx.font='bold 11px VT323';ctx.textAlign='center';
+    ctx.fillStyle=aff?'#ffe566':'#553355';
+    ctx.fillText('$'+getCost(id),pos.x,pos.y+PAD_R+14);
+
+    // label above pad
+    ctx.font='12px VT323';ctx.textAlign='center';
+    ctx.fillStyle=aff?'rgba(200,180,255,.7)':'rgba(100,80,120,.5)';
+    ctx.fillText(u.label,pos.x,pos.y-PAD_R-4);
+  }
+
+  // ── IN-WORLD INFO POPUP for nearest pad ──
+  if(nearestId&&nearestDist<140){
+    const u=UPG[nearestId];
+    const pos=PAD[nearestId];
+    const aff=money>=getCost(nearestId);
+    const px2=pos.x-camX, py2=pos.y-camY;
+
+    // Popup box — positioned above the pad, or below if near top of screen
+    const BW=240,BH=90;
+    let bx2=px2-BW/2, by2=py2-BH-50;
+    if(by2<10)by2=py2+55;
+    bx2=Math.max(10,Math.min(cvs.width-BW-270,bx2)); // avoid panel
+
+    ctx.fillStyle='rgba(8,3,22,.94)';
+    ctx.strokeStyle=aff?'#8855cc':'#442255';
+    ctx.lineWidth=1.5;
+    // rounded rect (fallback for browsers without roundRect)
+    const r6=6;
+    ctx.beginPath();
+    ctx.moveTo(bx2+r6,by2);ctx.lineTo(bx2+BW-r6,by2);ctx.arcTo(bx2+BW,by2,bx2+BW,by2+r6,r6);
+    ctx.lineTo(bx2+BW,by2+BH-r6);ctx.arcTo(bx2+BW,by2+BH,bx2+BW-r6,by2+BH,r6);
+    ctx.lineTo(bx2+r6,by2+BH);ctx.arcTo(bx2,by2+BH,bx2,by2+BH-r6,r6);
+    ctx.lineTo(bx2,by2+r6);ctx.arcTo(bx2,by2,bx2+r6,by2,r6);ctx.closePath();
+    ctx.fill();ctx.stroke();
+
+    ctx.textAlign='left';
+    ctx.font='bold 14px VT323';ctx.fillStyle='#cc88ff';
+    ctx.fillText(u.icon+' '+u.label,bx2+10,by2+20);
+
+    ctx.font='12px VT323';ctx.fillStyle='#999';
+    // Wrap description to ~30 chars per line
+    const words=u.desc.split(' ');
+    let line='',lineY=by2+38;
+    words.forEach(w=>{
+      if((line+' '+w).length>32){ctx.fillText(line,bx2+10,lineY);line=w;lineY+=16;}
+      else{line=line?line+' '+w:w;}
+    });
+    if(line)ctx.fillText(line,bx2+10,lineY);
+
+    // [E] prompt
+    if(nearestDist<70){
+      ctx.font='bold 13px VT323';ctx.textAlign='center';
+      ctx.fillStyle=aff?'#ffe566':'#ff5544';
+      ctx.fillText(aff?'[E] BUY — $'+getCost(nearestId):'Need $'+getCost(nearestId),px2,py2-50);
+    }
+  }
+
+  // ── ENEMIES ──────────────────────────────────────
+  enemies.forEach(e=>{
+    const wb=Math.sin(e.wob)*3;
+    ctx.fillStyle=e.col;ctx.beginPath();ctx.ellipse(e.x+e.w/2,e.y+e.h/2+wb,e.w/2+2,e.h/2+2,0,0,Math.PI*2);ctx.fill();
+    if(e.big){ctx.strokeStyle='rgba(255,255,255,.3)';ctx.lineWidth=2;ctx.stroke();}
+    ctx.fillStyle='#fff';
+    ctx.beginPath();ctx.arc(e.x+e.w*.3,e.y+e.h*.35+wb,e.big?5:3.5,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(e.x+e.w*.7,e.y+e.h*.35+wb,e.big?5:3.5,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#000';
+    ctx.beginPath();ctx.arc(e.x+e.w*.3,e.y+e.h*.35+wb,e.big?2.5:1.8,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(e.x+e.w*.7,e.y+e.h*.35+wb,e.big?2.5:1.8,0,Math.PI*2);ctx.fill();
+    if(e.hp<e.maxHp){ctx.fillStyle='#222';ctx.fillRect(e.x,e.y-10,e.w,5);ctx.fillStyle=e.big?'#ff8800':'#f44';ctx.fillRect(e.x,e.y-10,e.w*(e.hp/e.maxHp),5);}
+  });
+
+  // ── PLAYER ───────────────────────────────────────
+  const px=P.x,py=P.y,pw=P.w,ph=P.h;
+  ctx.fillStyle='rgba(0,0,0,.2)';ctx.beginPath();ctx.ellipse(px+pw/2,py+ph+3,pw/2,5,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=UPG.suit.lv>0?'#88ccff':'#ffe566';ctx.fillRect(px,py,pw,ph);
+  ctx.fillStyle='#886644';ctx.fillRect(px+2,py+ph*.5,pw-4,ph*.3);
+  ctx.fillStyle='#ffcc99';ctx.fillRect(px+4,py+2,pw-8,ph*.55);
+  ctx.fillStyle='#333';ctx.fillRect(px+6,py+8,4,3);ctx.fillRect(px+pw-10,py+8,4,3);
+  ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(px-14,py-20,60,14);
+  ctx.fillStyle='#ffe566';ctx.font='12px VT323';ctx.textAlign='center';ctx.fillText('Phil Collins',px+pw/2,py-8);
+  ctx.fillStyle='#222';ctx.fillRect(px-2,py-28,pw+4,6);
+  ctx.fillStyle=P.hp>50?'#44ff88':P.hp>25?'#ffaa22':'#f44';
+  ctx.fillRect(px-2,py-28,(pw+4)*(P.hp/P.maxHp),6);
+
+  // Swing arc
+  if(WPN.sw){
+    const wcx=px+pw/2,wcy=py+ph/2,a=WPN.swA,ah=Math.PI*.45,prog=1-WPN.swT/WPN.swDur;
+    const wlv=UPG.weapon.lv;
+    ctx.globalAlpha=(1-prog*.7)*.24;
+    ctx.fillStyle=wlv>=3?'#ffd700':wlv>=2?'#88ccff':'#ffaaaa';
+    ctx.beginPath();ctx.moveTo(wcx,wcy);ctx.arc(wcx,wcy,WPN.range,a-ah,a+ah);ctx.closePath();ctx.fill();
+    ctx.globalAlpha=(1-prog*.7)*.75;
+    ctx.strokeStyle=wlv>=3?'#ffd700':'#fff';ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(wcx,wcy,WPN.range,a-ah,a+ah);ctx.stroke();
+    ctx.strokeStyle=wlv>=2?'#aaddff':'#ffcccc';ctx.lineWidth=wlv>=2?5:3;
+    ctx.beginPath();ctx.moveTo(wcx,wcy);ctx.lineTo(wcx+Math.cos(a)*WPN.range,wcy+Math.sin(a)*WPN.range);ctx.stroke();
+    ctx.globalAlpha=1;
+  } else {
+    const wcx=px+pw/2,wcy=py+ph/2;
+    const a=Math.atan2(mouse.y-(wcy-camY),mouse.x-(wcx-camX));
+    ctx.globalAlpha=.13;ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.setLineDash([4,6]);
+    ctx.beginPath();ctx.moveTo(wcx,wcy);ctx.lineTo(wcx+Math.cos(a)*WPN.range,wcy+Math.sin(a)*WPN.range);ctx.stroke();
+    ctx.setLineDash([]);ctx.globalAlpha=1;
+  }
+
+  // Particles
+  pfx.forEach(p=>{ctx.globalAlpha=p.life/p.maxL;ctx.fillStyle=p.col;ctx.beginPath();ctx.arc(p.x+camX,p.y+camY,p.r,0,Math.PI*2);ctx.fill();});
+  ctx.globalAlpha=1;
+  ctx.restore();
+
+  drawMinimap();
+  document.getElementById('sMoney').textContent=Math.floor(money);
+  document.getElementById('sIncome').textContent=income.toFixed(1);
+  document.getElementById('sHp').textContent=Math.floor(P.hp);
+}
+
+// ── MINIMAP ────────────────────────────────────────
+function drawMinimap(){
+  const MW=mmCvs.width, MH=mmCvs.height; // 258×128
+  mmc.clearRect(0,0,MW,MH);
+  mmc.fillStyle='#060312';mmc.fillRect(0,0,MW,MH);
+  const sx=MW/WW,sy=MH/WH;
+  const allR=[
+    {r:HUB,o:true},
+    {r:WINGS.tower,o:OPEN.tower},{r:WINGS.armory,o:OPEN.armory},
+    {r:WINGS.barracks,o:OPEN.barracks},{r:WINGS.genroom,o:OPEN.genroom},
+    {r:WINGS.lab,o:OPEN.lab},{r:WINGS.market,o:OPEN.market},
+  ];
+  allR.forEach(({r,o})=>{mmc.fillStyle=o?'rgba(100,50,180,.7)':'rgba(50,25,70,.18)';mmc.fillRect(r.x*sx,r.y*sy,r.w*sx,r.h*sy);});
+  for(const id in PAD){
+    if(!canBuy(id)||!isVisible(id))continue;
+    const p=PAD[id];mmc.fillStyle='#aa66ff';mmc.beginPath();mmc.arc(p.x*sx,p.y*sy,2,0,Math.PI*2);mmc.fill();
+  }
+  mmc.fillStyle='#f44';enemies.forEach(e=>{mmc.fillRect(e.x*sx-1,e.y*sy-1,3,3);});
+  mmc.fillStyle='#ffe566';mmc.fillRect(P.x*sx-2,P.y*sy-2,4,4);
+}
+
+// ── PANEL ──────────────────────────────────────────
+// Tooltip is a fixed box at top of panel — triggered by mouseenter/mouseleave on rows.
+function updPanel(){
+  const el=document.getElementById('pList');
+  function cls(id){
+    const u=UPG[id];
+    if(u.type==='mul'&&u.lv>=u.max)return'maxed';
+    if((u.type==='one'||u.type==='inc'||u.type==='room')&&u.bought)return'owned';
+    return'';
+  }
+  function badge(id){
+    const u=UPG[id];
+    if(u.type==='mul')return u.lv>=u.max?'★MAX':`${u.lv}/${u.max}`;
+    if(u.bought)return'✅';
+    return'$'+getCost(id);
+  }
+  function sub(id){
+    const u=UPG[id];
+    if(u.bought&&u.type!=='mul')return'Purchased';
+    if(u.type==='mul'&&u.lv>=u.max)return'Maxed out';
+    if(u.type==='inc')return'+'+u.iv+'/s';
+    if(u.type==='mul')return'Lv '+u.lv+'/'+u.max;
+    return'$'+u.cost;
+  }
+  function row(id){
+    const u=UPG[id],c=cls(id);
+    // data-id used for hover events
+    return`<div class="pRow ${c}" data-id="${id}">
+      <div class="ico">${u.icon}</div>
+      <div class="inf"><b>${u.label}</b><small>${sub(id)}</small></div>
+      <div class="bdg">${badge(id)}</div>
+    </div>`;
+  }
+  function sec(h,ids){return`<div class="pSec"><h3>${h}</h3>${ids.map(row).join('')}</div>`;}
+
+  el.innerHTML=
+    sec('💰 INCOME',['i_scrap','i_moss','i_crystal','i_nest','i_star','i_plasma','i_dark','i_royalties'])+
+    sec('🏠 UNLOCK ROOMS',['r_tower','r_armory','r_barracks','r_genroom','r_lab','r_market'])+
+    sec('🛡️ BASE',['door','flood','beacon','medkit','shield','jammer'])+
+    sec('👤 PHIL',['music','boots','suit','weapon','aura','vampire'])+
+    sec('⚔️ ARMORY',['turret1','mines','wallup'])+
+    sec('🪖 BARRACKS',['regen','rally','stim'])+
+    sec('⚡ GENERATOR',['genup','overclock','beacon2'])+
+    sec('🔬 LAB',['scope','explosive','scanner'])+
+    sec('🏪 MARKET',['m_double','m_loot','m_rush']);
+
+  // Attach hover events after render
+  el.querySelectorAll('.pRow[data-id]').forEach(row=>{
+    row.addEventListener('mouseenter',()=>showTip(row.dataset.id));
+    row.addEventListener('mouseleave',()=>hideTip());
+  });
+}
+
+// ── MESSAGES ───────────────────────────────────────
+function showMsg(t){
+  const l=document.getElementById('msgLog');
+  const d=document.createElement('span');d.className='msg';d.textContent=t;
+  l.appendChild(d);setTimeout(()=>d.remove(),3200);
+}
+
+// ── GAME LOOP ──────────────────────────────────────
+function loop(ts){
+  if(!running)return;
+  const dt=Math.min((ts-lastT)/1000,.1);lastT=ts;
+  incAcc+=income*dt;
+  if(incAcc>=1){money+=Math.floor(incAcc);incAcc%=1;}
+  updPlayer(dt);updCam();updEnemies(dt);updPfx(dt);updBeacon(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ── START ──────────────────────────────────────────
+function startGame(){
+  document.getElementById('titleScreen').style.display='none';
+  running=true;lastT=performance.now();
+  genTerrain();makePads();buildWalls();
+  P.x=CX-P.w/2;
+  P.y=HUB.y+HUB.h+WT+50;   // south of hub entrance
+  updPanel();updPassivesHUD();
+  showMsg('🪐 Stranded on Boohbah Planet!');
+  showMsg('🟣 Enter base — walk to glowing pads, press E!');
+  requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,1572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stranded on Boohbah Planet</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#0a0a1a;overflow:hidden;font-family:'VT323',monospace;color:#e0d8ff;user-select:none;}
+#gameCanvas{display:block;position:absolute;top:0;left:0;}
+
+/* ── HUD ── */
+#hud{position:fixed;top:10px;left:10px;z-index:100;pointer-events:none;
+  background:rgba(4,2,14,.82);border:1px solid #2a1550;padding:8px 12px;border-radius:6px;}
+.stat{font-size:22px;color:#ffe566;text-shadow:0 0 8px #ffaa00;line-height:1.75;}
+.stat small{font-size:13px;color:#555;}
+#sMoney{font-size:26px;color:#ffe566;}
+
+/* ── MONEY DROPPER HUD ── */
+#moneyDropper{
+  position:fixed;top:10px;left:50%;transform:translateX(-50%);
+  z-index:101;pointer-events:none;
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+}
+#conveyorBar{
+  width:320px;height:38px;background:rgba(4,2,14,.92);
+  border:2px solid #3a1a66;border-radius:6px;overflow:hidden;position:relative;
+}
+#conveyorInner{
+  position:absolute;top:0;left:0;right:0;bottom:0;
+  display:flex;align-items:center;
+  background:repeating-linear-gradient(90deg,
+    rgba(100,50,200,.1) 0px, rgba(100,50,200,.1) 18px,
+    rgba(60,20,120,.12) 18px, rgba(60,20,120,.12) 36px);
+}
+#conveyorLabel{font-family:'Press Start 2P',monospace;font-size:8px;color:#aa66ff;
+  position:absolute;right:8px;top:50%;transform:translateY(-50%);white-space:nowrap;}
+#incomeLabel{font-size:17px;color:#ffe566;background:rgba(4,2,14,.9);
+  padding:2px 12px;border:1px solid #3a1a66;border-radius:4px;}
+
+/* ── TUTORIAL ── */
+#tutBox{
+  position:fixed;bottom:75px;left:50%;transform:translateX(-50%);
+  background:rgba(4,2,20,.98);border:2px solid #aa66ff;
+  padding:14px 22px 10px;border-radius:10px;z-index:200;
+  font-size:19px;color:#ddd;text-align:center;pointer-events:none;
+  box-shadow:0 0 40px rgba(100,40,255,.5);max-width:560px;transition:opacity .3s;
+  min-width:320px;
+}
+#tutBox .tutTitle{color:#ff88cc;display:block;font-family:'Press Start 2P',monospace;
+  font-size:8px;margin-bottom:7px;letter-spacing:1px;}
+#tutBox .tutMsg{line-height:1.55;color:#ddd;}
+#tutBox .tutProg{margin-top:8px;height:10px;background:#1a0a2e;border-radius:5px;overflow:hidden;}
+#tutBox .tutProgBar{height:100%;background:linear-gradient(90deg,#aa44ff,#ff44aa);
+  border-radius:5px;transition:width .5s;}
+#tutBox .tutStep{color:#ffe566;font-size:13px;margin-top:4px;}
+#tutBox .tutHint{color:#8866aa;font-size:14px;margin-top:5px;font-style:italic;}
+
+/* ── PANEL ── */
+#panel{position:fixed;right:0;top:0;width:290px;height:calc(100vh - 200px);
+  background:rgba(5,2,18,.98);border-left:2px solid #3a1a66;
+  z-index:100;overflow-y:auto;padding:8px 7px;
+  box-shadow:-4px 0 24px rgba(70,20,220,.3);}
+#panel h2{font-family:'Press Start 2P',monospace;font-size:7px;color:#aa66ff;
+  text-align:center;padding:7px 0 9px;border-bottom:1px solid #2a1a44;margin-bottom:9px;}
+.pSec{margin-bottom:11px;}
+.pSec h3{font-family:'Press Start 2P',monospace;font-size:6px;color:#ff88cc;
+  padding:3px 5px;background:rgba(255,50,150,.06);border-left:3px solid #ff44aa;margin-bottom:3px;}
+.pRow{position:relative;display:flex;align-items:center;gap:6px;
+  padding:5px 6px;margin-bottom:3px;border-radius:4px;
+  background:rgba(28,12,52,.85);border:1px solid #321850;font-size:15px;
+  transition:border-color .1s,background .1s;cursor:default;}
+.pRow:hover{background:rgba(48,22,82,.95);border-color:#7044bb;}
+.pRow .ico{font-size:16px;flex-shrink:0;width:20px;text-align:center;}
+.pRow .inf{flex:1;min-width:0;line-height:1.2;}
+.pRow .inf b{display:block;font-size:13px;color:#ddd;}
+.pRow .inf small{font-size:10px;color:#555;}
+.pRow .bdg{font-size:10px;flex-shrink:0;color:#ffe566;min-width:36px;text-align:right;}
+.pRow.owned{border-color:#33cc77;background:rgba(12,36,22,.8);}.pRow.owned .inf b{color:#44ee99;}
+.pRow.maxed{border-color:#ffaa22;background:rgba(40,22,6,.8);}.pRow.maxed .inf b{color:#ffcc44;}
+.pRow.seq-lock{opacity:.38;border-color:#442255;}
+.pRow.seq-lock .inf b{color:#775577;}
+.tip{display:none;position:fixed;right:294px;width:200px;
+  background:rgba(8,4,24,.98);border:1px solid #5522aa;
+  padding:8px 10px;border-radius:5px;font-size:13px;color:#bbb;line-height:1.55;
+  pointer-events:none;z-index:500;box-shadow:-3px 4px 20px rgba(70,10,180,.55);}
+.tip b{color:#cc88ff;display:block;font-size:12px;margin-bottom:3px;}
+.tip .tc{color:#ffe566;font-size:11px;margin-top:3px;}
+.tip .treq{color:#ff8888;font-size:11px;margin-top:3px;}
+.pRow:hover .tip{display:block;}
+#msgLog{position:fixed;bottom:10px;left:10px;z-index:100;pointer-events:none;}
+.msg{font-size:17px;color:#88ffcc;text-shadow:0 0 6px #00ffaa;animation:fm 3.2s forwards;display:block;}
+@keyframes fm{0%{opacity:1;transform:translateY(0)}80%{opacity:1;transform:translateY(-8px)}100%{opacity:0;transform:translateY(-24px)}}
+/* Minimap sits in bottom-right corner, flush with panel */
+#minimap{position:fixed;bottom:0;right:0;width:290px;height:196px;
+  z-index:100;border-top:2px solid #3a1a66;border-left:2px solid #3a1a66;
+  background:rgba(5,2,16,.98);display:flex;flex-direction:column;}
+#mmLabel{font-family:'Press Start 2P',monospace;font-size:6px;color:#6633aa;
+  text-align:center;padding:4px 0 3px;border-bottom:1px solid #2a1a44;}
+#mmCvs{display:block;}
+#titleScreen{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 40%,#1a0a3a 0%,#040410 70%);
+  z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;}
+#titleScreen h1{font-family:'Press Start 2P',monospace;font-size:clamp(9px,1.8vw,16px);
+  color:#ff88cc;text-shadow:0 0 22px #ff44aa,0 0 60px #aa00ff;text-align:center;line-height:1.9;}
+#titleScreen .sub{font-size:20px;color:#998;max-width:500px;text-align:center;line-height:1.65;}
+#startBtn{font-family:'Press Start 2P',monospace;font-size:10px;padding:12px 28px;margin-top:6px;
+  background:transparent;border:2px solid #ff44aa;color:#ff88cc;cursor:pointer;
+  letter-spacing:2px;transition:all .22s;position:relative;overflow:hidden;}
+#startBtn::before{content:'';position:absolute;inset:0;background:rgba(255,68,170,.1);
+  transform:scaleX(0);transform-origin:left;transition:transform .22s;}
+#startBtn:hover::before{transform:scaleX(1);}
+#startBtn:hover{box-shadow:0 0 28px #ff44aa;color:#fff;}
+.spin{animation:sp 6s linear infinite;display:inline-block;font-size:52px;}
+@keyframes sp{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+/* conveyor belt animation dots */
+.cbelt{animation:cb .8s linear infinite;}
+@keyframes cb{from{background-position:0 0}to{background-position:36px 0}}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="stat">💰 <span id="sMoney">500</span></div>
+  <div class="stat">🧲 <span id="sIncome">5.0</span>/s</div>
+  <div class="stat">❤️ <span id="sHp">100</span>/<span id="sMaxHp">100</span></div>
+  <div class="stat">🗡️ <span id="sWeapon">👊 Fists</span></div>
+  <div class="stat" id="sPassives" style="font-size:13px;color:#9977cc;min-height:20px;"></div>
+  <div class="stat"><small>WASD · Click=attack · E=buy pad</small></div>
+</div>
+
+<!-- CONVEYOR BELT INCOME DISPLAY -->
+<div id="moneyDropper">
+  <div id="conveyorBar">
+    <div id="conveyorInner">
+      <div id="conveyorCoins" style="position:absolute;left:0;top:0;right:0;bottom:0;"></div>
+    </div>
+    <div id="conveyorLabel">💰 INCOME BELT</div>
+  </div>
+  <div id="incomeLabel">⚡ <span id="sIncomeB">5.0</span> coins/sec</div>
+</div>
+
+<div id="panel"><h2>🛸 BASE UPGRADES</h2><div id="pi"></div></div>
+<div id="msgLog"></div>
+<div id="minimap"><div id="mmLabel">📡 MINIMAP</div><canvas id="mmCvs"></canvas></div>
+<div id="tutBox" style="display:none"></div>
+
+<div id="titleScreen">
+  <div class="spin">🛸</div>
+  <h1>STRANDED ON<br>BOOHBAH PLANET</h1>
+  <p class="sub">You are <b style="color:#ff88cc">Phil Collins</b>. Your tour bus crashed here.<br>
+  Walk into the base. Press <b style="color:#ffe566">E</b> near glowing pads to buy upgrades.<br>
+  Unlock rooms, build defenses, and survive the Boohbah waves!</p>
+  <button id="startBtn" onclick="startGame()">▶ START MISSION</button>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  BOOHBAH PLANET v4 — Conveyor Belt Tycoon Edition
+// ═══════════════════════════════════════════════════════
+const cvs=document.getElementById('gameCanvas');
+const ctx=cvs.getContext('2d');
+const mmEl=document.getElementById('mmCvs');
+const mmc=mmEl.getContext('2d');
+cvs.width=innerWidth;cvs.height=innerHeight;
+window.addEventListener('resize',()=>{cvs.width=innerWidth;cvs.height=innerHeight;});
+
+// ── WORLD ──────────────────────────────────────────────
+const WW=8000,WH=8000,TILE=48;
+const CX=WW/2,CY=WH/2;
+const WT=22,GAP=90;
+const MM=290;
+mmEl.width=MM;mmEl.height=172;
+
+// ── STATE ──────────────────────────────────────────────
+let running=false,money=9999999999999999,income=5,incAcc=0,lastT=0,beaconT=0;
+let camX=0,camY=0;
+let walls=[],doors=[],enemies=[],bullets=[],turrets=[],pfx=[],splashPfx=[];
+let mines=[],coinDrops=[],beltCoins=[];
+
+// ── CONVEYOR BELT COIN SYSTEM ──────────────────────────
+// coinDrops: {x,y,vx,vy,val,life,maxL,col} — float over world toward collector
+// beltCoins: animated coins sliding across the belt HUD bar
+const COIN_COLS=['#ffe566','#ffcc00','#ffaa22','#ff8844','#44ffcc'];
+let beltAnim=0; // phase for belt animation
+let incomeChunks=[]; // small batches to display as coin drops in world
+let totalDropped=0; // accumulator for spawning coin drop visuals
+
+function spawnCoinDrop(wx,wy,val,col){
+  // World-space coin that floats up and fades
+  coinDrops.push({x:wx,y:wy,vx:(Math.random()-.5)*25,vy:-55-Math.random()*35,
+    val,life:1.1,maxL:1.1,col:col||'#ffe566',r:9+Math.min(val*.08,10)});
+}
+
+function updCoinDrops(dt){
+  // Spawn world coin drops from income
+  totalDropped+=income*dt;
+  if(totalDropped>=1){
+    const n=Math.floor(totalDropped);
+    totalDropped-=n;
+    // Spawn near active income pads
+    const activePads=Object.keys(UPG).filter(id=>UPG[id].type==='inc'&&UPG[id].bought&&PAD[id]);
+    if(activePads.length>0){
+      for(let i=0;i<Math.min(n,3);i++){
+        const pid=activePads[Math.random()*activePads.length|0];
+        const p=PAD[pid];
+        const sx=p.x+(Math.random()-.5)*60-camX;
+        const sy=p.y+(Math.random()-.5)*40-camY;
+        beltCoins.push({x:sx,y:sy,vx:2+Math.random()*3,vy:-2+Math.random()*2,
+          life:0.85,maxL:0.85,val:1,col:COIN_COLS[Math.random()*COIN_COLS.length|0]});
+      }
+    }
+  }
+
+  // Update belt HUD coins
+  beltAnim+=dt*80;
+  for(let i=beltCoins.length-1;i>=0;i--){
+    const c=beltCoins[i];
+    c.x+=c.vx;c.y+=c.vy*0.3;c.life-=dt;
+    if(c.life<=0)beltCoins.splice(i,1);
+  }
+
+  // Update world coin drops
+  for(let i=coinDrops.length-1;i>=0;i--){
+    const c=coinDrops[i];
+    c.x+=c.vx*dt;c.y+=c.vy*dt;c.vy+=20*dt;c.life-=dt;
+    if(c.life<=0)coinDrops.splice(i,1);
+  }
+}
+
+function drawBeltHUD(){
+  const barEl=document.getElementById('conveyorBar');
+  const cvEl=document.getElementById('conveyorCoins');
+  // Draw mini coins sliding across belt using canvas overlay
+  // We animate via a separate small canvas
+  const w=barEl.offsetWidth||320,h=barEl.offsetHeight||38;
+  if(!drawBeltHUD._cvs){
+    const bc=document.createElement('canvas');
+    bc.width=w;bc.height=h;bc.style.cssText='position:absolute;top:0;left:0;pointer-events:none;';
+    cvEl.appendChild(bc);drawBeltHUD._cvs=bc;drawBeltHUD._ctx=bc.getContext('2d');
+  }
+  const bc=drawBeltHUD._ctx;
+  bc.clearRect(0,0,w,h);
+  // Conveyor belt teeth lines
+  const off=(beltAnim%36);
+  bc.strokeStyle='rgba(120,60,220,0.22)';bc.lineWidth=2;
+  for(let x=-36+off;x<w+36;x+=18){
+    bc.beginPath();bc.moveTo(x,0);bc.lineTo(x-12,h);bc.stroke();
+  }
+  // Coins on belt
+  beltCoins.forEach(c=>{
+    const al=c.life/c.maxL;
+    bc.globalAlpha=Math.min(1,al*2);
+    // Coin shape
+    bc.fillStyle=c.col;
+    bc.beginPath();bc.arc(c.x,h/2+c.y*.3,7,0,Math.PI*2);bc.fill();
+    bc.strokeStyle='rgba(255,255,255,0.4)';bc.lineWidth=1.5;bc.stroke();
+    bc.fillStyle='rgba(255,255,255,0.5)';bc.font='bold 8px Arial';bc.textAlign='center';
+    bc.fillText('$',c.x,h/2+c.y*.3+3);
+    bc.globalAlpha=1;
+  });
+  document.getElementById('sIncomeB').textContent=income.toFixed(1);
+}
+
+function drawCoinDrops(){
+  coinDrops.forEach(c=>{
+    const al=c.life/c.maxL;
+    ctx.save();
+    ctx.globalAlpha=al;
+    ctx.fillStyle=c.col;
+    ctx.beginPath();ctx.arc(c.x,c.y,c.r,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.35)';ctx.lineWidth=1.5;ctx.stroke();
+    ctx.fillStyle='#fff';ctx.font=`bold ${Math.max(8,c.r)}px VT323`;ctx.textAlign='center';
+    ctx.fillText('$'+c.val,c.x,c.y+c.r*.4);
+    ctx.restore();
+  });
+}
+
+// ── TUTORIAL — 6 STEPS ────────────────────────────────
+const TUT={
+  step:0,
+  steps:[
+    null,
+    // Step 1
+    {title:'STEP 1 / 6 — ENTER THE BASE',
+     msg:'Walk <b style="color:#ffe566">NORTH (up)</b> through the open doorway into your crashed base!',
+     hint:'Use W or ↑ to move north toward the glowing entrance',prog:1/6},
+    // Step 2
+    {title:'STEP 2 / 6 — BUY YOUR FIRST UPGRADE',
+     msg:'Find the <b style="color:#ffe566">🪨 Scrap Pile</b> pad glowing in the top area of the hub. Walk close and press <b style="color:#ff88cc">E</b> to buy it!',
+     hint:'Look for a glowing circle with 🪨 — the cheapest income source',prog:2/6},
+    // Step 3
+    {title:'STEP 3 / 6 — WATCH YOUR INCOME BELT',
+     msg:'Look at the <b style="color:#ff88cc">conveyor belt</b> at the top of the screen — coins flow across it from your upgrades! Buy <b style="color:#ffe566">2 more income pads</b> to increase your flow.',
+     hint:'Each income pad adds coins to the belt. Buy Alien Moss next!',prog:3/6},
+    // Step 4
+    {title:'STEP 4 / 6 — UNLOCK A ROOM',
+     msg:'You\'re making money! Now <b style="color:#ffe566">unlock a wing</b> of the base. Find a <b style="color:#ff88cc">room unlock pad</b> (🗼🔫🪖⚡) near the hub walls and buy one!',
+     hint:'Room unlock pads are near the hub walls. The Tower costs $200',prog:4/6},
+    // Step 5
+    {title:'STEP 5 / 6 — KILL YOUR FIRST BOOHBAH',
+     msg:'Boohbahs are coming! <b style="color:#ff4444">Left-click</b> in the direction of an enemy to attack. Your weapon swings in an arc — kill <b style="color:#ffe566">1 Boohbah</b>!',
+     hint:'Click toward the enemy. Your attack range is shown as a dotted line.',prog:5/6},
+    // Step 6
+    {title:'STEP 6 / 6 — BUILD YOUR DEFENSES',
+     msg:'Excellent! Now buy the <b style="color:#ffe566">Base Door</b> 🚪 upgrade from the hub\'s bottom-left area, then survive as long as possible! All upgrades are now <b style="color:#44ff88">UNLOCKED!</b>',
+     hint:'Tip: press E near the door to open/close it as needed.',prog:6/6},
+  ],
+  killed:false,enteredBase:false,boughtFirst:false,
+  roomUnlocked:false,incPadsBought:0,doorBought:false,
+};
+
+// ── PLAYER ─────────────────────────────────────────────
+const P={x:0,y:0,w:32,h:32,speed:170,hp:100,maxHp:100,
+  regen:0,armor:0,aura:false,auraR:0,vampR:0};
+
+// ── INPUT ──────────────────────────────────────────────
+const K={};
+document.addEventListener('keydown',e=>{K[e.key]=true;});
+document.addEventListener('keyup',  e=>{K[e.key]=false;});
+const mouse={x:0,y:0};
+document.addEventListener('mousemove',e=>{mouse.x=e.clientX;mouse.y=e.clientY;});
+document.addEventListener('mousedown',e=>{if(e.button===0&&running)doSwing();});
+
+// ── WEAPON ─────────────────────────────────────────────
+const WPN={dmg:22,range:85,cd:0.45,t:0,swT:0,swDur:0.18,swA:0,sw:false,lv:0,
+  names:['👊 Fists','🥁 Drumstick','🎤 Mic Stand','🥁 Golden Kit']};
+
+// ── BASE LAYOUT ────────────────────────────────────────
+const HUB={x:CX-450,y:CY-450,w:900,h:900};
+const WINGS={
+  tower:   {x:CX-350,y:CY-450-600-100,w:700,h:600,floor:'#060d1a',accent:'#2266bb',label:'⚡ Watch Tower'},
+  armory:  {x:CX+450+100,y:CY-350,    w:700,h:700,floor:'#1a0504',accent:'#aa2222',label:'🔫 Armory'},
+  barracks:{x:CX-450-700-100,y:CY-350,w:700,h:700,floor:'#051808',accent:'#228822',label:'🪖 Barracks'},
+  genroom: {x:CX-350,y:CY+450+100,    w:700,h:560,floor:'#0d1a04',accent:'#66aa22',label:'⚡ Generator'},
+  lab:     {x:CX-350-560-100,y:CY+450+100,w:560,h:560,floor:'#051a18',accent:'#228888',label:'🔬 Research Lab'},
+  market:  {x:CX+350+100,y:CY+450+100,w:560,h:560,floor:'#090418',accent:'#774499',label:'🏪 Black Market'},
+};
+const OPEN={tower:false,armory:false,barracks:false,genroom:false,lab:false,market:false};
+
+// ── UPGRADES — boosted economy ─────────────────────────
+const UPG={
+  // INCOME — sequential chain, much higher income values
+  i_scrap:    {icon:'🪨',label:'Scrap Pile',    type:'inc',cost:40,   iv:4,   req:null,      desc:'Salvaged metal scrap. Your first source of income.'},
+  i_moss:     {icon:'🌿',label:'Alien Moss',    type:'inc',cost:90,   iv:9,   req:'i_scrap', desc:'Bioluminescent moss — sells for surprising amounts.'},
+  i_crystal:  {icon:'💎',label:'Crystal Vein',  type:'inc',cost:200,  iv:20,  req:'i_moss',  desc:'Alien crystals. Very rare and incredibly valuable.'},
+  i_nest:     {icon:'🪺',label:'Boohbah Nest',  type:'inc',cost:450,  iv:45,  req:'i_crystal',desc:'Alien investors pay you to NOT hatch the eggs.'},
+  i_star:     {icon:'⭐',label:'Star Fragment',  type:'inc',cost:950,  iv:90,  req:'i_nest',  desc:'Fallen star shards. The galaxy goes wild for these.'},
+  i_plasma:   {icon:'🔵',label:'Plasma Core',   type:'inc',cost:2200, iv:180, req:'i_star',  desc:'Unstable plasma — somehow powers your whole empire.'},
+  i_dark:     {icon:'🌑',label:'Dark Matter',   type:'inc',cost:5500, iv:380, req:'i_plasma', desc:'Incomprehensible substance. Incomprehensible income.'},
+  i_royalties:{icon:'🎵',label:'Phil Royalties',type:'inc',cost:11000,iv:750, req:'i_dark',  desc:'"In the Air Tonight" royalties. Infinite generational wealth.'},
+
+  // ROOM UNLOCK
+  r_tower:    {icon:'🗼',label:'Open Watch Tower',  type:'room',cost:200,rk:'tower',   req:null,         desc:'Opens north wall. Reveals the elevated Watch Tower wing.'},
+  r_armory:   {icon:'🔫',label:'Open Armory',       type:'room',cost:300,rk:'armory',  req:null,         desc:'Opens east wall. Reveals the heavily armed Armory.'},
+  r_barracks: {icon:'🪖',label:'Open Barracks',     type:'room',cost:300,rk:'barracks',req:null,         desc:'Opens west wall. Reveals the military Barracks.'},
+  r_genroom:  {icon:'⚡',label:'Open Generator Rm', type:'room',cost:400,rk:'genroom', req:null,         desc:'Opens south wall. Reveals the Generator complex.'},
+  r_lab:      {icon:'🔬',label:'Open Research Lab', type:'room',cost:700,rk:'lab',     req:'r_genroom',  desc:'Opens Lab wing from Generator. Unlocks research chain.'},
+  r_market:   {icon:'🏪',label:'Open Black Market', type:'room',cost:700,rk:'market',  req:'r_genroom',  desc:'Opens Market wing from Generator. Unlocks trade chain.'},
+
+  // HUB BASE — sequential, cheaper starts
+  door:   {icon:'🚪',label:'Base Door',       type:'one',cost:100, req:null,    desc:'Lockable door on south entrance. Press E near it.'},
+  flood:  {icon:'💡',label:'Floodlights',     type:'one',cost:200, req:'door',  desc:'Slows Boohbahs near hub by 45%. Very useful early.'},
+  beacon: {icon:'📡',label:'Signal Beacon',   type:'one',cost:400, req:'flood', desc:'Supply drops: +120💰 every 25s.'},
+  medkit: {icon:'🩺',label:'Med Station',     type:'one',cost:300, req:'beacon',desc:'+3 HP/s passive regeneration.'},
+  shield: {icon:'🛡️',label:'Barrier Shield',  type:'one',cost:500, req:'medkit',desc:'+18 passive armor — big damage reduction.'},
+  jammer: {icon:'📻',label:'Signal Jammer',   type:'one',cost:650, req:'shield',desc:'Confuses Boohbah pathfinding — they wander randomly.'},
+
+  // HUB PHIL
+  music:  {icon:'🎵',label:'CD Player',       type:'one',cost:80,  req:null,    desc:'Phil jams out. +40 movement speed forever.'},
+  boots:  {icon:'👟',label:'Speed Boots',     type:'mul',cost:180, costM:1.9,max:3,lv:0,req:'music',    desc:'Each level: +28 movement speed.'},
+  suit:   {icon:'🥼',label:'Hazmat Suit',     type:'mul',cost:180, costM:2.1,max:3,lv:0,req:'boots',    desc:'Each level: +35 max HP. Phil becomes tankier.'},
+  weapon: {icon:'⚔️',label:'Weapon Upgrade', type:'mul',cost:90,  costM:2.8,max:3,lv:0,req:'music',    desc:'Fists → Drumstick → Mic Stand → Golden Kit.'},
+  aura:   {icon:'✨',label:'Damage Aura',     type:'one',cost:850, req:'suit',  desc:'Phil emits a 20 dps aura. Enemies burn just standing near you.'},
+  vampire:{icon:'🩸',label:'Vampire Fang',    type:'one',cost:650, req:'aura',  desc:'Each kill restores +10 HP. Life-steal is overpowered.'},
+  rally:  {icon:'🚩',label:'Rally Point',     type:'one',cost:400, req:'weapon',desc:'+25% kill reward permanently.'},
+  stim:   {icon:'💉',label:'Stim Pack',       type:'one',cost:380, req:'rally', desc:'Attack cooldown reduced 25%.'},
+
+  // WATCH TOWER — conveyor: left→right linear path
+  tw_scope1:  {icon:'🔭',label:'Sniper Scope I',    type:'mul',cost:280,costM:1.9,max:3,lv:0,req:null,         desc:'Each level: +35 weapon range. The tower is all about range.'},
+  tw_scope2:  {icon:'🎯',label:'Precision Scope',   type:'one',cost:650,req:'tw_scope1',  desc:'25% chance of critical hits dealing 3x damage.'},
+  tw_early:   {icon:'📣',label:'Early Warning',     type:'one',cost:500,req:'tw_scope2',  desc:'Enemies appear on minimap from 2x further away.'},
+  tw_flare:   {icon:'🌟',label:'Flare Launcher',    type:'mul',cost:550,costM:2.3,max:3,lv:0,req:'tw_early',   desc:'Flares slow enemies and boost income when they hit.'},
+  tw_snipe:   {icon:'💥',label:'Overwatch Protocol',type:'one',cost:1100,req:'tw_flare',  desc:'+60% weapon damage when Phil is inside the tower.'},
+
+  // ARMORY — conveyor: rows of 3 across the room
+  ar_wall1:   {icon:'🧱',label:'Reinforce Walls',  type:'mul',cost:130,costM:1.9,max:4,lv:0,req:null,          desc:'Each level reinforces walls — visually and structurally.'},
+  ar_turret1: {icon:'🎯',label:'Turret Mk.1',      type:'mul',cost:380,costM:2.7,max:2,lv:0,req:'ar_wall1',    desc:'Auto-firing turret. Range and damage scale with level.'},
+  ar_turret2: {icon:'🚀',label:'Turret Mk.2',      type:'mul',cost:850,costM:2.8,max:2,lv:0,req:'ar_turret1',  desc:'Upgraded turret fires 3-bullet bursts.'},
+  ar_mines:   {icon:'💣',label:'Proximity Mines',  type:'mul',cost:230,costM:2.1,max:3,lv:0,req:'ar_wall1',    desc:'Mines placed around base perimeter. Big explosion radius.'},
+  ar_flak:    {icon:'🔥',label:'Flak Cannon',      type:'one',cost:1300,req:'ar_turret2',  desc:'AoE cannon fires every 8s at the largest enemy cluster.'},
+  ar_shield:  {icon:'🛡️',label:'Aegis System',    type:'one',cost:1700,req:'ar_flak',      desc:'Energy barrier absorbs 60 damage, refreshes every 20s.'},
+
+  // BARRACKS — two parallel conveyor lines
+  br_medic:   {icon:'💊',label:'Field Medic',      type:'mul',cost:200,costM:1.9,max:4,lv:0,req:null,          desc:'Each level: +2 HP/s passive regeneration.'},
+  br_combat:  {icon:'🥊',label:'Combat Training',  type:'mul',cost:260,costM:2.1,max:3,lv:0,req:'br_medic',    desc:'Each level: +10 melee damage.'},
+  br_rally:   {icon:'🚩',label:'War Cry',          type:'one',cost:480,req:'br_combat',    desc:'Enemies near Phil take +35% more damage.'},
+  br_stim:    {icon:'⚡',label:'Adrenal Boost',    type:'mul',cost:320,costM:2.3,max:3,lv:0,req:'br_rally',     desc:'Each level: attack cooldown reduced 10%.'},
+  br_tank:    {icon:'🛡️',label:'Iron Skin',       type:'mul',cost:420,costM:2.3,max:3,lv:0,req:'br_stim',      desc:'Each level: +14 armor damage reduction.'},
+  br_berserk: {icon:'😤',label:'Berserker Mode',   type:'one',cost:1800,req:'br_tank',     desc:'Below 30% HP: speed +80%, damage ×2. Get low to get deadly.'},
+
+  // GENERATOR — conveyor belt of 3+2
+  gen_up1:    {icon:'⚡',label:'Generator Mk.1',   type:'mul',cost:320,costM:1.8,max:3,lv:0,req:null,          desc:'Each level: +15/s income. The core of your economy.'},
+  gen_up2:    {icon:'🔋',label:'Generator Mk.2',   type:'mul',cost:650,costM:1.9,max:3,lv:0,req:'gen_up1',     desc:'Each level: +28/s income. Late-game cash engine.'},
+  gen_over:   {icon:'🔧',label:'Overclock',        type:'mul',cost:480,costM:2.3,max:3,lv:0,req:'gen_up1',     desc:'Each level: boosts ALL income by +15%.'},
+  gen_beacon: {icon:'🛸',label:'Deep Beacon',      type:'mul',cost:560,costM:1.9,max:4,lv:0,req:'gen_over',    desc:'Each level: +80💰 per drop, -5s beacon interval.'},
+  gen_fusion: {icon:'☢️',label:'Fusion Reactor',  type:'one',cost:2800,req:'gen_up2',      desc:'ALL income ×1.6. Single biggest income multiplier in game.'},
+
+  // LAB — snake path across room
+  lab_range:  {icon:'🔭',label:'Extended Range',   type:'mul',cost:370,costM:2.1,max:3,lv:0,req:null,          desc:'Each level: +35 weapon attack range.'},
+  lab_explo:  {icon:'💥',label:'Explosive Rounds', type:'mul',cost:650,costM:2.8,max:3,lv:0,req:'lab_range',   desc:'Each level: bigger weapon splash damage.'},
+  lab_xray:   {icon:'🩻',label:'X-Ray Vision',     type:'one',cost:850,req:'lab_range',    desc:'Enemies visible through walls on minimap.'},
+  lab_drone:  {icon:'🤖',label:'Combat Drone',     type:'mul',cost:1000,costM:2.8,max:2,lv:0,req:'lab_explo',  desc:'Orbiting combat drone deals 10 dps to nearby enemies.'},
+  lab_nano:   {icon:'🧬',label:'Nano Swarm',       type:'one',cost:2400,req:'lab_drone',   desc:'Nanobots: +6 HP/s regen + 25% all damage.'},
+
+  // MARKET — compact 3+2 grid
+  mk_double:  {icon:'💸',label:'Double Dip',       type:'one',cost:750,req:null,            desc:'All passive income DOUBLED. The best single purchase.'},
+  mk_rush:    {icon:'⚡',label:'Cash Rush',        type:'one',cost:550,req:'mk_double',     desc:'Instantly receive +800💰. One-time emergency windfall.'},
+  mk_loot:    {icon:'🎁',label:'Loot Magnet',      type:'mul',cost:320,costM:2.3,max:4,lv:0,req:'mk_double',  desc:'Each level: +8💰 per kill.'},
+  mk_black:   {icon:'🖤',label:'Black Op Contract',type:'one',cost:1400,req:'mk_loot',      desc:'Enemies drop +25💰 per kill permanently.'},
+  mk_god:     {icon:'👑',label:'Phil Invincible',  type:'one',cost:4800,req:'mk_black',     desc:'Invincible for 10s every 30s. Phil is unstoppable.'},
+};
+
+const PAD={};
+const ROOM_PADS={
+  tower:   ['tw_scope1','tw_scope2','tw_early','tw_flare','tw_snipe'],
+  armory:  ['ar_wall1','ar_turret1','ar_turret2','ar_mines','ar_flak','ar_shield'],
+  barracks:['br_medic','br_combat','br_rally','br_stim','br_tank','br_berserk'],
+  genroom: ['gen_up1','gen_up2','gen_over','gen_beacon','gen_fusion'],
+  lab:     ['lab_range','lab_explo','lab_xray','lab_drone','lab_nano'],
+  market:  ['mk_double','mk_rush','mk_loot','mk_black','mk_god'],
+};
+
+let fusionBought=false,invincT=0,invincCD=30,aegisHP=0;
+let combatDrones=[];
+
+// ── PAD PLACEMENT — conveyor-style rows per room ───────
+function makePads(){
+  function pl(id,x,y){PAD[id]={x,y};}
+  const H=HUB;
+
+  // ── INCOME: 4-col grid, 2 rows across center-top of hub ──
+  const iIds=['i_scrap','i_moss','i_crystal','i_nest','i_star','i_plasma','i_dark','i_royalties'];
+  const iColW=200, iStart=H.x+80;
+  iIds.forEach((id,i)=>{
+    const col=i%4, row=Math.floor(i/4);
+    pl(id, iStart+col*iColW, H.y+120+row*190);
+  });
+
+  // ── ROOM UNLOCK PADS: against hub walls, one per wall ──
+  pl('r_tower',    CX,          H.y+60);       // north wall, centered
+  pl('r_armory',   H.x+H.w-70, CY-80);         // east wall
+  pl('r_barracks', H.x+70,     CY-80);          // west wall
+  pl('r_genroom',  CX,          H.y+H.h-60);   // south wall
+  // Lab + Market unlock pads: inside genroom, near genroom's side walls
+  const G=WINGS.genroom;
+  pl('r_lab',    G.x+80,       G.y+G.h/2);
+  pl('r_market', G.x+G.w-80,   G.y+G.h/2);
+
+  // ── HUB BASE CHAIN: 2 columns of 3 in bottom-left quadrant ──
+  // Column 1: door, flood, beacon  Column 2: medkit, shield, jammer
+  const bc1x=H.x+120, bc2x=H.x+300;
+  const bcY=[H.y+H.h-180, H.y+H.h-360, H.y+H.h-540];
+  pl('door',   bc1x, bcY[0]);
+  pl('flood',  bc1x, bcY[1]);
+  pl('beacon', bc1x, bcY[2]);
+  pl('medkit', bc2x, bcY[0]);
+  pl('shield', bc2x, bcY[1]);
+  pl('jammer', bc2x, bcY[2]);
+
+  // ── HUB PHIL: 2 columns in bottom-right quadrant ──
+  // Column A (music chain): music→boots→suit→aura→vampire
+  // Column B (weapon chain): weapon→rally→stim
+  const phAx=H.x+H.w-380, phBx=H.x+H.w-180;
+  const phY=[H.y+H.h-180, H.y+H.h-360, H.y+H.h-540, H.y+H.h-720];
+  pl('music',   phAx, phY[0]);
+  pl('boots',   phAx, phY[1]);
+  pl('suit',    phAx, phY[2]);
+  pl('aura',    phAx, phY[3]);
+  pl('vampire', phAx, H.y+H.h-860); // 5th in col A — near top
+  pl('weapon',  phBx, phY[0]);
+  pl('rally',   phBx, phY[1]);
+  pl('stim',    phBx, phY[2]);
+
+  // ── WATCH TOWER (700×600): 3 pads top row, 2 pads bottom row ──
+  const T=WINGS.tower;
+  pl('tw_scope1', T.x+120,      T.y+T.h*0.30);
+  pl('tw_scope2', T.x+120+210,  T.y+T.h*0.30);
+  pl('tw_early',  T.x+120+420,  T.y+T.h*0.30);
+  pl('tw_flare',  T.x+120+105,  T.y+T.h*0.70);
+  pl('tw_snipe',  T.x+120+315,  T.y+T.h*0.70);
+
+  // ── ARMORY (700×700): 3+3 grid evenly spaced ──
+  const A=WINGS.armory;
+  const aSp=210, aX0=A.x+115;
+  pl('ar_wall1',   aX0,        A.y+160);
+  pl('ar_turret1', aX0+aSp,    A.y+160);
+  pl('ar_turret2', aX0+aSp*2,  A.y+160);
+  pl('ar_mines',   aX0,        A.y+160+230);
+  pl('ar_flak',    aX0+aSp,    A.y+160+230);
+  pl('ar_shield',  aX0+aSp*2,  A.y+160+230);
+
+  // ── BARRACKS (700×700): 3+3 grid evenly spaced ──
+  const B=WINGS.barracks;
+  const bSp=210, bX0=B.x+115;
+  pl('br_medic',  bX0,        B.y+160);
+  pl('br_combat', bX0+bSp,    B.y+160);
+  pl('br_rally',  bX0+bSp*2,  B.y+160);
+  pl('br_stim',   bX0,        B.y+160+230);
+  pl('br_tank',   bX0+bSp,    B.y+160+230);
+  pl('br_berserk',bX0+bSp*2,  B.y+160+230);
+
+  // ── GENERATOR (700×560): 3 top + 2 centered bottom ──
+  const GG=WINGS.genroom;
+  pl('gen_up1',    GG.x+120,       GG.y+155);
+  pl('gen_up2',    GG.x+120+210,   GG.y+155);
+  pl('gen_over',   GG.x+120+420,   GG.y+155);
+  pl('gen_beacon', GG.x+120+105,   GG.y+155+210);
+  pl('gen_fusion', GG.x+120+315,   GG.y+155+210);
+
+  // ── LAB (560×560): 3 top + 2 centered bottom ──
+  const L=WINGS.lab;
+  pl('lab_range',  L.x+100,       L.y+140);
+  pl('lab_explo',  L.x+100+160,   L.y+140);
+  pl('lab_xray',   L.x+100+320,   L.y+140);
+  pl('lab_drone',  L.x+100+80,    L.y+140+210);
+  pl('lab_nano',   L.x+100+240,   L.y+140+210);
+
+  // ── MARKET (560×560): 3 top + 2 centered bottom ──
+  const M=WINGS.market;
+  pl('mk_double',  M.x+100,       M.y+140);
+  pl('mk_rush',    M.x+100+160,   M.y+140);
+  pl('mk_loot',    M.x+100+320,   M.y+140);
+  pl('mk_black',   M.x+100+80,    M.y+140+210);
+  pl('mk_god',     M.x+100+240,   M.y+140+210);
+}
+
+// ── HELPERS ────────────────────────────────────────────
+function getCost(id){const u=UPG[id];return u.type==='mul'?Math.round(u.cost*Math.pow(u.costM,u.lv)):u.cost;}
+function isBought(id){const u=UPG[id];if(!u)return false;return u.type==='mul'?u.lv>0:!!u.bought;}
+function canBuy(id){const u=UPG[id];if(!u)return false;return u.type==='mul'?u.lv<u.max:!u.bought;}
+function reqMet(id){const u=UPG[id];if(!u)return false;if(!u.req)return true;return isBought(u.req);}
+function isVisible(id){
+  for(const[rk,list]of Object.entries(ROOM_PADS)){if(list.includes(id))return OPEN[rk];}
+  if(id==='r_lab'||id==='r_market')return OPEN.genroom;
+  return true;
+}
+function isBuyableNow(id){
+  if(!canBuy(id)||!isVisible(id)||!reqMet(id))return false;
+  // Tutorial gating: step 1 = nothing, step 2 = only i_scrap, step 3 = inc pads only
+  // step 4 = inc+room pads, step 5+ = all
+  const s=TUT.step;
+  if(s<=1)return false;
+  if(s===2)return id==='i_scrap';
+  if(s===3){
+    const incPad=UPG[id]&&UPG[id].type==='inc';
+    return incPad;
+  }
+  if(s===4){
+    const incOrRoom=UPG[id]&&(UPG[id].type==='inc'||UPG[id].type==='room');
+    return incOrRoom;
+  }
+  return true; // step 5, 6, 7+
+}
+function aabb(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
+
+// ── WALL BUILDER ───────────────────────────────────────
+function buildWalls(){
+  walls=[];doors=[];
+  function hw(x,y,w,gCX){
+    if(gCX==null){walls.push({x,y,w,h:WT});return;}
+    const g0=gCX-GAP/2,g1=gCX+GAP/2;
+    if(g0>x)walls.push({x,y,w:g0-x,h:WT});
+    if(g1<x+w)walls.push({x:g1,y,w:(x+w)-g1,h:WT});
+  }
+  function vw(x,y,h,gCY){
+    if(gCY==null){walls.push({x,y,w:WT,h});return;}
+    const g0=gCY-GAP/2,g1=gCY+GAP/2;
+    if(g0>y)walls.push({x,y,w:WT,h:g0-y});
+    if(g1<y+h)walls.push({x,y:g1,w:WT,h:(y+h)-g1});
+  }
+  function box(r,gaps={}){
+    const{x,y,w,h}=r;
+    hw(x-WT,y-WT,w+WT*2,gaps.top  ??null);
+    hw(x-WT,y+h, w+WT*2,gaps.bot  ??null);
+    vw(x-WT,y-WT,h+WT*2,gaps.left ??null);
+    vw(x+w, y-WT,h+WT*2,gaps.right??null);
+  }
+  box(HUB,{
+    top:  OPEN.tower    ?CX:null,
+    right:OPEN.armory   ?CY:null,
+    left: OPEN.barracks ?CY:null,
+    bot:  CX,
+  });
+  if(UPG.door.bought)doors.push({x:CX-GAP/2,y:HUB.y+HUB.h,w:GAP,h:WT,open:false});
+  if(OPEN.tower)    box(WINGS.tower,   {bot:CX});
+  if(OPEN.armory)   box(WINGS.armory,  {left:CY});
+  if(OPEN.barracks) box(WINGS.barracks,{right:CY});
+  if(OPEN.genroom){
+    box(WINGS.genroom,{top:CX,
+      left: OPEN.lab    ?WINGS.lab.y+WINGS.lab.h/2    :null,
+      right:OPEN.market ?WINGS.market.y+WINGS.market.h/2:null});
+  }
+  if(OPEN.lab)    box(WINGS.lab,   {right:WINGS.lab.y+WINGS.lab.h/2});
+  if(OPEN.market) box(WINGS.market,{left: WINGS.market.y+WINGS.market.h/2});
+}
+
+function rebuildMines(){
+  mines=[];
+  const lv=UPG.ar_mines.lv;if(lv===0)return;
+  const count=lv*8,r=870+lv*100;
+  for(let i=0;i<count;i++){
+    const a=(i/count)*Math.PI*2;
+    mines.push({x:CX+Math.cos(a)*r,y:CY+Math.sin(a)*r,alive:true,blink:Math.random()*Math.PI*2});
+  }
+}
+function rebuildTurrets(){
+  turrets=[];
+  if(!OPEN.armory)return;
+  const A=WINGS.armory;
+  const lv1=UPG.ar_turret1.lv,lv2=UPG.ar_turret2.lv;
+  if(lv1>0)turrets.push({x:A.x+A.w/2-110,y:A.y+A.h/2-80,t:0,angle:0,range:320+lv1*90,dmg:22+lv1*18,bRate:0.9+lv1*0.3,burst:1});
+  if(lv2>0)turrets.push({x:A.x+A.w/2+110,y:A.y+A.h/2-80,t:0,angle:0,range:300+lv2*80,dmg:32+lv2*22,bRate:1.0+lv2*0.4,burst:3});
+}
+function rebuildDrones(){
+  combatDrones=[];
+  const lv=UPG.lab_drone.lv;if(lv===0)return;
+  for(let i=0;i<lv;i++)combatDrones.push({angle:(i/lv)*Math.PI*2,r:90});
+}
+
+// ── TUTORIAL ───────────────────────────────────────────
+function advanceTutorial(step){
+  TUT.step=step;
+  const box=document.getElementById('tutBox');
+  const s=TUT.steps[step];
+  if(step>6){
+    box.innerHTML='<span class="tutTitle">✅ MISSION ACTIVE</span><div class="tutMsg" style="color:#44ff88">All systems go! Build your defenses and survive!</div>';
+    setTimeout(()=>{box.style.opacity='0';setTimeout(()=>{box.style.display='none';},400);},4000);
+    return;
+  }
+  if(!s){box.style.display='none';return;}
+  box.style.display='block';box.style.opacity='1';
+  const pct=Math.round(s.prog*100);
+  box.innerHTML=`
+    <span class="tutTitle">📖 ${s.title}</span>
+    <div class="tutMsg">${s.msg}</div>
+    <div class="tutProg"><div class="tutProgBar" style="width:${pct}%"></div></div>
+    <div class="tutStep">${step} / 6 complete</div>
+    <div class="tutHint">💡 ${s.hint}</div>`;
+  updPanel();
+}
+
+// ── BUY ────────────────────────────────────────────────
+function tryBuy(id){
+  const u=UPG[id];if(!u||!canBuy(id))return;
+  if(!reqMet(id)){showMsg('🔒 Need: '+UPG[u.req].label+' first!');return;}
+  if(!isBuyableNow(id)){
+    if(TUT.step<=5)showMsg('📖 Complete tutorial step '+TUT.step+' first!');
+    return;
+  }
+  const cost=getCost(id);
+  if(money<cost){showMsg('💸 Need $'+cost+' (have $'+Math.floor(money)+')');return;}
+  money-=cost;
+
+  if(u.type==='inc'){
+    u.bought=true;
+    let iv=u.iv;
+    if(UPG.mk_double.bought)iv*=2;
+    if(fusionBought)iv=Math.round(iv*1.6);
+    income+=iv;
+    // Big coin drop visual
+    if(PAD[id])spawnCoinDrop(PAD[id].x,PAD[id].y,iv,'#ffe566');
+    showMsg('💰 '+u.label+' +'+iv+'/s added to belt!');
+    TUT.incPadsBought++;
+    if(TUT.step===2)advanceTutorial(3);
+    else if(TUT.step===3&&TUT.incPadsBought>=3)advanceTutorial(4);
+  } else if(u.type==='room'){
+    u.bought=true;OPEN[u.rk]=true;buildWalls();
+    showMsg('🏠 '+WINGS[u.rk].label+' unlocked!');
+    if(!TUT.roomUnlocked){TUT.roomUnlocked=true;if(TUT.step===4)advanceTutorial(5);}
+  } else if(u.type==='one'){
+    u.bought=true;applyOne(id);
+    if(id==='door'){TUT.doorBought=true;if(TUT.step===6)advanceTutorial(7);}
+  } else if(u.type==='mul'){
+    u.lv++;applyMul(id);
+    showMsg(u.icon+' '+u.label+(u.lv>=u.max?' MAX!':` Lv${u.lv}/${u.max}`));
+  }
+
+  if(PAD[id])spawnPfx(PAD[id].x-camX,PAD[id].y-camY,'#ffe566',18);
+  document.getElementById('sIncome').textContent=income.toFixed(1);
+  document.getElementById('sMaxHp').textContent=P.maxHp;
+  updPanel();updPassivesHUD();
+}
+
+function applyOne(id){
+  const M={
+    door:    ()=>{buildWalls();showMsg('🚪 Door installed!');},
+    flood:   ()=>showMsg('💡 Floodlights on — Boohbahs slowed!'),
+    beacon:  ()=>showMsg('📡 Beacon online! +120💰 every 25s'),
+    medkit:  ()=>{P.regen+=3;showMsg('🩺 Med Station — +3 HP/s!');},
+    shield:  ()=>{P.armor+=18;showMsg('🛡️ Armor +18!');},
+    jammer:  ()=>showMsg('📻 Signal Jammer active!'),
+    music:   ()=>{P.speed+=40;showMsg('🎵 CD Player — speed up!');},
+    aura:    ()=>{P.aura=true;P.auraR=115;showMsg('✨ Damage Aura active!');},
+    vampire: ()=>{P.vampR=10;showMsg('🩸 Vampire Fang — +10 HP per kill!');},
+    rally:   ()=>showMsg('🚩 +25% kill money!'),
+    stim:    ()=>{WPN.cd*=0.75;showMsg('💉 Stim — faster attacks!');},
+    tw_scope2:()=>showMsg('🎯 Critical hits enabled!'),
+    tw_early: ()=>showMsg('📣 Early Warning active!'),
+    tw_snipe: ()=>showMsg('💥 Tower sniper bonus active!'),
+    ar_flak:  ()=>showMsg('🔥 Flak Cannon armed!'),
+    ar_shield:()=>{aegisHP=60;showMsg('🛡️ Aegis System online!');},
+    br_rally: ()=>showMsg('🚩 War Cry — +35% damage zone!'),
+    br_berserk:()=>showMsg('😤 Berserker Mode enabled!'),
+    gen_fusion:()=>{fusionBought=true;income=Math.round(income*1.6);
+      showMsg('☢️ Fusion Reactor — income ×1.6!');
+      document.getElementById('sIncome').textContent=income.toFixed(1);},
+    lab_xray: ()=>showMsg('🩻 X-Ray Vision active!'),
+    lab_nano: ()=>{P.regen+=6;showMsg('🧬 Nano Swarm — +6 HP/s, +25% dmg!');},
+    mk_double:()=>{income=5;for(const k in UPG){const u=UPG[k];if(u.type==='inc'&&u.bought)income+=u.iv*2;}
+      showMsg('💸 DOUBLE DIP — income DOUBLED!');document.getElementById('sIncome').textContent=income.toFixed(1);},
+    mk_rush:  ()=>{money+=800;showMsg('⚡ Cash Rush — +800💰!');},
+    mk_black: ()=>showMsg('🖤 Black Op — +25💰 per kill!'),
+    mk_god:   ()=>{invincT=10;showMsg('👑 Phil INVINCIBLE for 10s!');},
+  };
+  if(M[id])M[id]();
+}
+function applyMul(id){
+  const u=UPG[id];
+  const acts={
+    boots:   ()=>{P.speed+=28;},
+    suit:    ()=>{P.maxHp+=35;P.hp=Math.min(P.hp+35,P.maxHp);},
+    weapon:  ()=>{WPN.lv=u.lv;WPN.dmg=22+u.lv*24;WPN.range=85+u.lv*26;
+                  WPN.cd=Math.max(0.17,0.45-u.lv*0.07);
+                  document.getElementById('sWeapon').textContent=WPN.names[u.lv];},
+    ar_turret1:()=>rebuildTurrets(),
+    ar_turret2:()=>rebuildTurrets(),
+    ar_mines:  ()=>rebuildMines(),
+    br_medic:  ()=>{P.regen+=2;},
+    br_combat: ()=>{WPN.dmg+=10;},
+    br_stim:   ()=>{WPN.cd=Math.max(0.11,WPN.cd*0.9);},
+    br_tank:   ()=>{P.armor+=14;},
+    gen_up1:   ()=>{income+=15;},
+    gen_up2:   ()=>{income+=28;},
+    gen_over:  ()=>{income=Math.round(income*1.15);showMsg('🔧 Overclock — income +15%!');},
+    tw_scope1: ()=>{WPN.range+=35;},
+    lab_range: ()=>{WPN.range+=35;},
+    lab_drone: ()=>rebuildDrones(),
+  };
+  if(acts[id])acts[id]();
+}
+function updPassivesHUD(){
+  const parts=[];
+  if(P.regen>0)parts.push('+'+P.regen+' HP/s');
+  if(P.armor>0)parts.push(P.armor+' armor');
+  if(P.aura)parts.push('✨ aura');
+  if(P.vampR>0)parts.push('🩸 vamp');
+  document.getElementById('sPassives').textContent=parts.join('  ');
+}
+
+// ── TERRAIN ────────────────────────────────────────────
+const TSEED=Math.random()*9999|0;
+function tileCol(tx,ty){
+  const v=Math.abs(Math.sin(tx*127.1+ty*311.7+TSEED)*43758.5453%1);
+  return v<.04?'#5522aa':v<.12?'#9955dd':v<.52?'#7744bb':v<.74?'#8833cc':'#6633aa';
+}
+const TFEATS=[];
+function genTerrain(){
+  for(let i=0;i<380;i++){
+    const r=Math.random();
+    TFEATS.push({x:Math.random()*WW,y:Math.random()*WH,
+      type:r<.4?'rock':r<.7?'xtal':'egg',
+      size:11+Math.random()*26,color:r<.4?'#554488':r<.7?'#cc44ff':'#ffaacc',
+      angle:Math.random()*Math.PI*2});
+  }
+}
+
+// ── COMBAT ─────────────────────────────────────────────
+function doSwing(){
+  if(!running||WPN.t>0)return;
+  const pcx=P.x+P.w/2-camX,pcy=P.y+P.h/2-camY;
+  const a=Math.atan2(mouse.y-pcy,mouse.x-pcx);
+  WPN.swA=a;WPN.sw=true;WPN.swT=WPN.swDur;WPN.t=WPN.cd;
+  const wx=P.x+P.w/2,wy=P.y+P.h/2,arc=Math.PI*.48;
+  const splashLv=UPG.lab_explo.lv;
+  const nanoBuff=UPG.lab_nano.bought?1.25:1;
+  const bersBuff=(UPG.br_berserk.bought&&P.hp/P.maxHp<0.3)?2:1;
+  const snipeBuff=(UPG.tw_snipe.bought&&inTower())?1.6:1;
+  for(let i=enemies.length-1;i>=0;i--){
+    const e=enemies[i];
+    const ex=e.x+e.w/2,ey=e.y+e.h/2,dx=ex-wx,dy=ey-wy,d=Math.hypot(dx,dy);
+    if(d>WPN.range)continue;
+    let ad=Math.atan2(dy,dx)-a;
+    while(ad>Math.PI)ad-=Math.PI*2;while(ad<-Math.PI)ad+=Math.PI*2;
+    if(Math.abs(ad)>arc)continue;
+    let dmg=WPN.dmg*nanoBuff*bersBuff*snipeBuff;
+    if(UPG.tw_scope2.bought&&Math.random()<0.25){dmg*=3;spawnPfx(ex-camX,ey-camY,'#ffd700',10);}
+    if(UPG.br_rally.bought&&Math.hypot(dx,dy)<200)dmg*=1.35;
+    e.hp-=dmg;e.x+=(dx/d)*18;e.y+=(dy/d)*18;e.st=.25;
+    spawnPfx(ex-camX,ey-camY,e.col,6);
+    if(splashLv>0){
+      const sR=65+splashLv*38,sD=WPN.dmg*0.5*splashLv;
+      splashPfx.push({x:ex-camX,y:ey-camY,r:0,maxR:sR,t:0.3,maxT:0.3});
+      for(let j=enemies.length-1;j>=0;j--){
+        if(j===i)continue;
+        const e2=enemies[j];
+        if(Math.hypot(e2.x+e2.w/2-ex,e2.y+e2.h/2-ey)<sR){e2.hp-=sD;e2.st=0.12;}
+      }
+    }
+    if(e.hp<=0)killEnemy(i,e);
+  }
+}
+function inTower(){
+  const T=WINGS.tower;
+  return P.x>=T.x&&P.x<=T.x+T.w&&P.y>=T.y&&P.y<=T.y+T.h;
+}
+function killEnemy(i,e){
+  let reward=8+WPN.lv*3+(UPG.mk_loot.lv*8);
+  if(UPG.rally.bought||UPG.br_rally.bought)reward=Math.floor(reward*1.25);
+  if(UPG.mk_black.bought)reward+=25;
+  money+=reward;
+  if(P.vampR>0)P.hp=Math.min(P.maxHp,P.hp+P.vampR);
+  spawnPfx(e.x+e.w/2-camX,e.y+e.h/2-camY,e.col,14);
+  // Coin drop for kills
+  spawnCoinDrop(e.x+e.w/2,e.y+e.h/2,reward,'#ffcc44');
+  enemies.splice(i,1);
+  if(TUT.step===5&&!TUT.killed){
+    TUT.killed=true;advanceTutorial(6);
+  }
+}
+
+// ── ENEMIES ────────────────────────────────────────────
+let eT=0,eRate=9,eDiff=1;
+const ECOLS=['#ff44aa','#ff8844','#aa44ff','#44ffcc','#ff4444','#ffdd44'];
+function spawnEnemy(){
+  const s=Math.random()*4|0;
+  let ex,ey;
+  if(s===0){ex=Math.random()*WW;ey=0;}
+  else if(s===1){ex=WW;ey=Math.random()*WH;}
+  else if(s===2){ex=Math.random()*WW;ey=WH;}
+  else{ex=0;ey=Math.random()*WH;}
+  const big=eDiff>2.5&&Math.random()<0.22;
+  enemies.push({x:ex,y:ey,w:big?44:24,h:big?44:24,
+    speed:(big?32:52)+Math.random()*28*eDiff,
+    hp:(big?150:34)*eDiff,maxHp:(big?150:34)*eDiff,
+    col:ECOLS[Math.random()*ECOLS.length|0],wob:Math.random()*6.28,st:0,jamT:0,big});
+}
+function updEnemies(dt){
+  eT+=dt;
+  if(eT>=eRate){eT=0;spawnEnemy();if(eRate>1.5)eRate-=0.04;eDiff=Math.min(eDiff+.035,10);}
+  const jamActive=UPG.jammer.bought,floodActive=UPG.flood.bought;
+  // Flak
+  if(UPG.ar_flak&&UPG.ar_flak.bought){
+    if(!updEnemies._ft)updEnemies._ft=0;
+    updEnemies._ft+=dt;
+    if(updEnemies._ft>=8){
+      updEnemies._ft=0;
+      let bx=CX,by=CY,bc=0;
+      for(const e of enemies){bx+=e.x;by+=e.y;bc++;}
+      if(bc>0){bx/=bc;by/=bc;}
+      for(let j=enemies.length-1;j>=0;j--){
+        const e=enemies[j];
+        if(Math.hypot(e.x-bx,e.y-by)<210){e.hp-=200;if(e.hp<=0)killEnemy(j,e);}
+      }
+      spawnPfx(bx-camX,by-camY,'#ff4400',38);
+    }
+  }
+  for(let i=enemies.length-1;i>=0;i--){
+    const e=enemies[i];
+    e._slow=floodActive&&Math.hypot(e.x-CX,e.y-CY)<560;
+    if(jamActive){
+      e.jamT-=dt;
+      if(e.jamT<=0){e.jamT=2+Math.random()*3;e._jamA=Math.atan2(P.y-e.y,P.x-e.x)+(Math.random()-.5)*Math.PI*1.4;}
+    }
+    if(e.st>0){e.st-=dt;e.wob+=dt*3;continue;}
+    e.wob+=dt*3;
+    const spd=e.speed*(e._slow?0.45:1);
+    const angle=jamActive&&e._jamA!=null?e._jamA:Math.atan2(P.y-e.y,P.x-e.x);
+    const nx=e.x+Math.cos(angle)*spd*dt,ny=e.y+Math.sin(angle)*spd*dt;
+    let bx=false,by=false;
+    for(const w of walls){
+      if(aabb({x:nx,y:e.y,w:e.w,h:e.h},w))bx=true;
+      if(aabb({x:e.x,y:ny,w:e.w,h:e.h},w))by=true;
+    }
+    if(!bx)e.x=nx;if(!by)e.y=ny;
+    if(aabb(e,P)){
+      if(invincT<=0){
+        let dmg=9*dt;
+        if(P.armor>0)dmg=Math.max(0,(9-P.armor*.09)*dt);
+        P.hp-=dmg;if(P.hp<0)P.hp=0;
+        spawnPfx(P.x-camX,P.y-camY,'#ff4444',2);
+      }
+    }
+    if(P.aura){
+      if(Math.hypot(e.x+e.w/2-(P.x+P.w/2),e.y+e.h/2-(P.y+P.h/2))<P.auraR){
+        const ad=(20*(UPG.lab_nano.bought?1.25:1))*dt;
+        e.hp-=ad;if(e.hp<=0)killEnemy(i,e);
+      }
+    }
+    for(let m=mines.length-1;m>=0;m--){
+      const mn=mines[m];if(!mn.alive)continue;
+      if(Math.hypot(e.x+e.w/2-mn.x,e.y+e.h/2-mn.y)<46){
+        mn.alive=false;spawnPfx(mn.x-camX,mn.y-camY,'#ff8800',30);
+        for(let j=enemies.length-1;j>=0;j--){
+          const e2=enemies[j];
+          if(Math.hypot(e2.x+e2.w/2-mn.x,e2.y+e2.h/2-mn.y)<120){
+            e2.hp-=90+UPG.ar_mines.lv*40;if(e2.hp<=0)killEnemy(j,e2);
+          }
+        }break;
+      }
+    }
+  }
+  // Turrets
+  turrets.forEach(tu=>{
+    tu.t-=dt;
+    let tgt=null,tgtD=tu.range;
+    for(const e of enemies){const d=Math.hypot(e.x+e.w/2-tu.x,e.y+e.h/2-tu.y);if(d<tgtD){tgt=e;tgtD=d;}}
+    if(!tgt){tu.angle+=dt*1.3;return;}
+    tu.angle=Math.atan2(tgt.y+tgt.h/2-tu.y,tgt.x+tgt.w/2-tu.x);
+    if(tu.t<=0){
+      tu.t=1/tu.bRate;
+      for(let b=0;b<tu.burst;b++){
+        const sp=(b-(tu.burst-1)/2)*0.06;
+        bullets.push({x:tu.x,y:tu.y,vx:Math.cos(tu.angle+sp)*580,vy:Math.sin(tu.angle+sp)*580,dmg:tu.dmg,life:0.7,col:'#ff8844'});
+      }
+    }
+  });
+  // Drones
+  combatDrones.forEach(dr=>{
+    dr.angle+=dt*1.5;
+    const dx=P.x+P.w/2+Math.cos(dr.angle)*dr.r,dy=P.y+P.h/2+Math.sin(dr.angle)*dr.r;
+    for(let i=enemies.length-1;i>=0;i--){
+      const e=enemies[i];
+      if(Math.hypot(e.x+e.w/2-dx,e.y+e.h/2-dy)<58){e.hp-=10*dt;if(e.hp<=0)killEnemy(i,e);}
+    }
+  });
+  // Bullets
+  for(let i=bullets.length-1;i>=0;i--){
+    const b=bullets[i];b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;
+    if(b.life<=0){bullets.splice(i,1);continue;}
+    let hit=false;
+    for(const w of walls){if(aabb({x:b.x-4,y:b.y-4,w:8,h:8},w)){hit=true;break;}}
+    if(hit){bullets.splice(i,1);continue;}
+    for(let j=enemies.length-1;j>=0;j--){
+      const e=enemies[j];
+      if(aabb({x:b.x-6,y:b.y-6,w:12,h:12},e)){
+        e.hp-=b.dmg;spawnPfx(b.x-camX,b.y-camY,'#ff8844',5);
+        if(e.hp<=0)killEnemy(j,e);bullets.splice(i,1);hit=true;break;
+      }
+    }
+  }
+}
+
+// ── PARTICLES ──────────────────────────────────────────
+function spawnPfx(sx,sy,col,n){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*6.28,sp=55+Math.random()*90;
+    pfx.push({x:sx,y:sy,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:.55+Math.random()*.4,maxL:.7,col,r:2+Math.random()*3.5});
+  }
+}
+function updPfx(dt){
+  for(let i=pfx.length-1;i>=0;i--){
+    const p=pfx[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=.86;p.vy*=.86;p.life-=dt;
+    if(p.life<=0)pfx.splice(i,1);
+  }
+  for(let i=splashPfx.length-1;i>=0;i--){
+    const s=splashPfx[i];s.t-=dt;s.r=s.maxR*(1-s.t/s.maxT);if(s.t<=0)splashPfx.splice(i,1);
+  }
+}
+
+// ── PLAYER ─────────────────────────────────────────────
+function updPlayer(dt){
+  if(WPN.t>0)WPN.t-=dt;
+  if(WPN.swT>0)WPN.swT-=dt;else WPN.sw=false;
+  if(P.regen>0)P.hp=Math.min(P.maxHp,P.hp+P.regen*dt);
+  if(invincT>0)invincT-=dt;
+  else if(UPG.mk_god.bought){invincCD-=dt;if(invincCD<=0){invincCD=30;invincT=10;showMsg('👑 INVINCIBLE!');}}
+
+  let mx=0,my=0;
+  if(K['w']||K['W']||K['ArrowUp'])   my-=1;
+  if(K['s']||K['S']||K['ArrowDown']) my+=1;
+  if(K['a']||K['A']||K['ArrowLeft']) mx-=1;
+  if(K['d']||K['D']||K['ArrowRight'])mx+=1;
+  const ln=Math.hypot(mx,my);if(ln>0){mx/=ln;my/=ln;}
+  let spd=P.speed;
+  if(UPG.br_berserk&&UPG.br_berserk.bought&&P.hp/P.maxHp<0.3)spd*=1.8;
+  const nx=Math.max(0,Math.min(WW-P.w,P.x+mx*spd*dt));
+  const ny=Math.max(0,Math.min(WH-P.h,P.y+my*spd*dt));
+  let bx=false,by=false;
+  for(const w of walls){
+    if(aabb({x:nx,y:P.y,w:P.w,h:P.h},w))bx=true;
+    if(aabb({x:P.x,y:ny,w:P.w,h:P.h},w))by=true;
+  }
+  for(const d of doors){
+    if(d.open){
+      if(aabb({x:nx,y:P.y,w:P.w,h:P.h},d))bx=false;
+      if(aabb({x:P.x,y:ny,w:P.w,h:P.h},d))by=false;
+    }
+  }
+  if(!bx)P.x=nx;if(!by)P.y=ny;
+
+  // Tutorial checks
+  if(TUT.step===1&&aabb(P,HUB)&&!TUT.enteredBase){
+    TUT.enteredBase=true;advanceTutorial(2);
+  }
+
+  if(K['e']||K['E']){
+    K['e']=false;K['E']=false;
+    for(const d of doors){
+      if(Math.hypot(d.x+d.w/2-P.x-P.w/2,d.y+d.h/2-P.y-P.h/2)<90){
+        d.open=!d.open;showMsg(d.open?'🚪 Door open!':'🔒 Door locked!');break;
+      }
+    }
+    let bestId=null,bestD=80;
+    for(const id in PAD){
+      if(!canBuy(id)||!isVisible(id))continue;
+      const p=PAD[id],d=Math.hypot(p.x-P.x-P.w/2,p.y-P.y-P.h/2);
+      if(d<bestD){bestId=id;bestD=d;}
+    }
+    if(bestId)tryBuy(bestId);
+  }
+}
+
+function updCam(){
+  const tx=P.x+P.w/2-cvs.width/2,ty=P.y+P.h/2-cvs.height/2;
+  camX+=(tx-camX)*.1;camY+=(ty-camY)*.1;
+  camX=Math.max(0,Math.min(WW-cvs.width,camX));camY=Math.max(0,Math.min(WH-cvs.height,camY));
+}
+
+function updBeacon(dt){
+  if(!UPG.beacon.bought&&UPG.gen_beacon.lv===0)return;
+  beaconT+=dt;
+  let interval=25,reward=UPG.beacon.bought?120:0;
+  const lv2=UPG.gen_beacon.lv;
+  if(lv2>0){interval=Math.max(7,25-lv2*5);reward+=80*lv2;}
+  if(beaconT>=interval){
+    beaconT=0;money+=reward;showMsg('📦 Supply drop! +'+reward+'💰');
+    spawnCoinDrop(HUB.x+HUB.w-90,HUB.y+80,reward,'#44ff88');
+  }
+}
+
+// ── DRAW ───────────────────────────────────────────────
+function drawFloor(r,col,acc){
+  ctx.fillStyle=col;ctx.fillRect(r.x,r.y,r.w,r.h);
+  ctx.strokeStyle=acc+'1a';ctx.lineWidth=1;
+  for(let gx=r.x;gx<=r.x+r.w;gx+=TILE){ctx.beginPath();ctx.moveTo(gx,r.y);ctx.lineTo(gx,r.y+r.h);ctx.stroke();}
+  for(let gy=r.y;gy<=r.y+r.h;gy+=TILE){ctx.beginPath();ctx.moveTo(r.x,gy);ctx.lineTo(r.x+r.w,gy);ctx.stroke();}
+  ctx.strokeStyle=acc+'33';ctx.lineWidth=2;ctx.strokeRect(r.x+2,r.y+2,r.w-4,r.h-4);
+}
+function drawGhost(r,acc){
+  ctx.globalAlpha=.06;ctx.fillStyle=acc;ctx.fillRect(r.x,r.y,r.w,r.h);
+  ctx.globalAlpha=.15;ctx.strokeStyle=acc;ctx.lineWidth=1;
+  ctx.setLineDash([5,10]);ctx.strokeRect(r.x,r.y,r.w,r.h);ctx.setLineDash([]);ctx.globalAlpha=1;
+}
+function roomLabel(r,txt,col){
+  ctx.fillStyle=col+'88';ctx.font='bold 20px VT323';ctx.textAlign='center';
+  ctx.fillText(txt,r.x+r.w/2,r.y+26);
+}
+function drawCorr(side){
+  let r;const H=HUB;
+  if(side==='top'){const W=WINGS.tower;r={x:CX-GAP/2,y:W.y+W.h,w:GAP,h:H.y-(W.y+W.h)};}
+  else if(side==='bot'){const W=WINGS.genroom;r={x:CX-GAP/2,y:H.y+H.h,w:GAP,h:W.y-(H.y+H.h)};}
+  else if(side==='left'){const W=WINGS.barracks;r={x:W.x+W.w,y:CY-GAP/2,w:H.x-(W.x+W.w),h:GAP};}
+  else if(side==='right'){const W=WINGS.armory;r={x:H.x+H.w,y:CY-GAP/2,w:W.x-(H.x+H.w),h:GAP};}
+  else if(side==='lab'){const W=WINGS.lab,G=WINGS.genroom;r={x:W.x+W.w,y:G.y+G.h/2-GAP/2,w:G.x-(W.x+W.w),h:GAP};}
+  else if(side==='market'){const W=WINGS.market,G=WINGS.genroom;r={x:G.x+G.w,y:G.y+G.h/2-GAP/2,w:W.x-(G.x+G.w),h:GAP};}
+  ctx.fillStyle='#0d0820';ctx.fillRect(r.x,r.y,r.w,r.h);
+}
+
+// Draw conveyor belt arrow between two pads (tycoon style)
+function drawConveyorArrow(x1,y1,x2,y2,col,phase){
+  const dx=x2-x1,dy=y2-y1,d=Math.hypot(dx,dy);
+  if(d<10)return;
+  const ux=dx/d,uy=dy/d;
+  // Belt body
+  ctx.save();
+  ctx.strokeStyle=col+'44';ctx.lineWidth=12;ctx.setLineDash([14,10]);
+  ctx.lineDashOffset=-phase*24;
+  ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+  ctx.setLineDash([]);
+  // Arrow head
+  ctx.strokeStyle=col+'88';ctx.lineWidth=3;ctx.fillStyle=col+'55';
+  const mx=(x1+x2)/2+ux*8,my=(y1+y2)/2+uy*8;
+  const px=-uy*8,py=ux*8;
+  ctx.beginPath();ctx.moveTo(mx,my);ctx.lineTo(mx-ux*14+px,my-uy*14+py);ctx.lineTo(mx-ux*14-px,my-uy*14-py);ctx.closePath();
+  ctx.fill();ctx.stroke();
+  ctx.restore();
+}
+
+function draw(){
+  const sg=ctx.createRadialGradient(cvs.width/2,cvs.height/2,0,cvs.width/2,cvs.height/2,cvs.width);
+  sg.addColorStop(0,'#1a0a3a');sg.addColorStop(1,'#040410');
+  ctx.fillStyle=sg;ctx.fillRect(0,0,cvs.width,cvs.height);
+  ctx.save();ctx.translate(-camX,-camY);
+
+  // Tiles
+  const stx=Math.max(0,camX/TILE|0),sty=Math.max(0,camY/TILE|0);
+  const etx=Math.min(WW/TILE,(camX+cvs.width)/TILE+2)|0;
+  const ety=Math.min(WH/TILE,(camY+cvs.height)/TILE+2)|0;
+  for(let ty=sty;ty<ety;ty++)for(let tx=stx;tx<etx;tx++){
+    ctx.fillStyle=tileCol(tx,ty);ctx.fillRect(tx*TILE,ty*TILE,TILE,TILE);
+  }
+  ctx.strokeStyle='#aa44ff';ctx.lineWidth=8;ctx.strokeRect(4,4,WW-8,WH-8);
+
+  // Terrain
+  TFEATS.forEach(f=>{
+    const fx=f.x-camX;if(fx<-60||fx>cvs.width+60)return;
+    ctx.fillStyle=f.color;
+    if(f.type==='rock'){ctx.beginPath();ctx.ellipse(f.x,f.y,f.size,f.size*.7,f.angle,0,Math.PI*2);ctx.fill();}
+    else if(f.type==='xtal'){
+      ctx.save();ctx.translate(f.x,f.y);ctx.rotate(f.angle);
+      ctx.beginPath();ctx.moveTo(0,-f.size);ctx.lineTo(f.size*.4,0);ctx.lineTo(0,f.size*.5);ctx.lineTo(-f.size*.4,0);ctx.closePath();ctx.fill();ctx.restore();
+    }else{ctx.beginPath();ctx.ellipse(f.x,f.y,f.size*.7,f.size,0,0,Math.PI*2);ctx.fill();}
+  });
+
+  // Corridors
+  if(OPEN.tower)drawCorr('top');
+  if(OPEN.armory)drawCorr('right');
+  if(OPEN.barracks)drawCorr('left');
+  if(OPEN.genroom)drawCorr('bot');
+  if(OPEN.lab)drawCorr('lab');
+  if(OPEN.market)drawCorr('market');
+
+  // Floors
+  const phase=(Date.now()/1000)%1;
+  drawFloor(HUB,'#18092e','#aa66ff');roomLabel(HUB,'🛸 Main Hub','#aa66ff');
+
+  // INCOME CONVEYOR BELT — arrows L→R per row, then row connector down
+  const iIds=['i_scrap','i_moss','i_crystal','i_nest','i_star','i_plasma','i_dark','i_royalties'];
+  for(let row=0;row<2;row++){
+    for(let col=0;col<3;col++){
+      const idx=row*4+col,nxt=idx+1;
+      if(nxt<iIds.length&&Math.floor(nxt/4)===row){
+        const p1=PAD[iIds[idx]],p2=PAD[iIds[nxt]];
+        if(p1&&p2)drawConveyorArrow(p1.x,p1.y,p2.x,p2.y,UPG[iIds[idx]].bought?'#ffe566':'#553366',phase);
+      }
+    }
+    // Row connector: last of row → first of next row
+    const endOfRow=PAD[iIds[row*4+3]],startNextRow=PAD[iIds[(row+1)*4]];
+    if(endOfRow&&startNextRow&&(row+1)*4<iIds.length)
+      drawConveyorArrow(endOfRow.x,endOfRow.y,startNextRow.x,startNextRow.y,UPG[iIds[row*4+3]].bought?'#ffe566':'#553366',phase);
+  }
+  // BASE CHAIN arrows (col1 top→down, then col1→col2 connector, col2 top→down)
+  const bc=['door','flood','beacon','medkit','shield','jammer'];
+  [[0,1],[1,2]].forEach(([a,b])=>{
+    const p1=PAD[bc[a]],p2=PAD[bc[b]];
+    if(p1&&p2)drawConveyorArrow(p1.x,p1.y,p2.x,p2.y,UPG[bc[a]].bought?'#88ccff':'#223344',phase);
+  });
+  // beacon → medkit (col1 to col2)
+  if(PAD['beacon']&&PAD['medkit'])drawConveyorArrow(PAD['beacon'].x,PAD['beacon'].y,PAD['medkit'].x,PAD['medkit'].y,UPG['beacon'].bought?'#88ccff':'#223344',phase);
+  [[3,4],[4,5]].forEach(([a,b])=>{
+    const p1=PAD[bc[a]],p2=PAD[bc[b]];
+    if(p1&&p2)drawConveyorArrow(p1.x,p1.y,p2.x,p2.y,UPG[bc[a]].bought?'#88ccff':'#223344',phase);
+  });
+  // PHIL arrows col A
+  const phA=['music','boots','suit','aura','vampire'];
+  phA.forEach((id,i)=>{if(i<phA.length-1&&PAD[id]&&PAD[phA[i+1]])
+    drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[phA[i+1]].x,PAD[phA[i+1]].y,UPG[id].bought||UPG[id].lv>0?'#ff88cc':'#442244',phase);});
+  // Phil col B
+  const phB=['weapon','rally','stim'];
+  phB.forEach((id,i)=>{if(i<phB.length-1&&PAD[id]&&PAD[phB[i+1]])
+    drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[phB[i+1]].x,PAD[phB[i+1]].y,UPG[id].bought||UPG[id].lv>0?'#ff88cc':'#442244',phase);});
+
+  // Room floor + belt arrows
+  if(OPEN.tower){
+    drawFloor(WINGS.tower,'#050c18','#2266bb');roomLabel(WINGS.tower,WINGS.tower.label,'#4488ff');
+    ctx.fillStyle='rgba(30,60,140,0.04)';ctx.fillRect(WINGS.tower.x,WINGS.tower.y,WINGS.tower.w,WINGS.tower.h);
+    // Belt: single horizontal line for scope chain
+    const tw=['tw_scope1','tw_scope2','tw_early'];
+    tw.forEach((id,i)=>{if(i<tw.length-1&&PAD[id]&&PAD[tw[i+1]]){
+      drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[tw[i+1]].x,PAD[tw[i+1]].y,
+        UPG[id].bought||UPG[id].lv>0?'#4488ff':'#222255',phase);}});
+    if(PAD['tw_early']&&PAD['tw_flare'])drawConveyorArrow(PAD['tw_early'].x,PAD['tw_early'].y,PAD['tw_flare'].x,PAD['tw_flare'].y,'#334488',phase);
+    if(PAD['tw_flare']&&PAD['tw_snipe'])drawConveyorArrow(PAD['tw_flare'].x,PAD['tw_flare'].y,PAD['tw_snipe'].x,PAD['tw_snipe'].y,UPG['tw_flare'].lv>0?'#4488ff':'#334488',phase);
+  }
+  if(OPEN.armory){
+    drawFloor(WINGS.armory,'#180403','#aa2222');roomLabel(WINGS.armory,WINGS.armory.label,'#ff4422');
+    ctx.fillStyle='rgba(200,20,0,0.03)';ctx.fillRect(WINGS.armory.x,WINGS.armory.y,WINGS.armory.w,WINGS.armory.h);
+    // Two belt rows
+    const aRow1=['ar_wall1','ar_turret1','ar_turret2'],aRow2=['ar_mines','ar_flak','ar_shield'];
+    [aRow1,aRow2].forEach(row=>row.forEach((id,i)=>{if(i<row.length-1&&PAD[id]&&PAD[row[i+1]]){
+      drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[row[i+1]].x,PAD[row[i+1]].y,
+        isBought(id)?'#ff4422':'#552222',phase);}}));
+    if(PAD['ar_wall1']&&PAD['ar_mines'])drawConveyorArrow(PAD['ar_wall1'].x,PAD['ar_wall1'].y,PAD['ar_mines'].x,PAD['ar_mines'].y,'#443322',phase);
+  }
+  if(OPEN.barracks){
+    drawFloor(WINGS.barracks,'#041606','#228822');roomLabel(WINGS.barracks,WINGS.barracks.label,'#44cc44');
+    ctx.globalAlpha=0.04;ctx.fillStyle='#003300';
+    for(let s=0;s<8;s++)ctx.fillRect(WINGS.barracks.x+s*88,WINGS.barracks.y,44,WINGS.barracks.h);
+    ctx.globalAlpha=1;
+    const bRow1=['br_medic','br_combat','br_rally'],bRow2=['br_stim','br_tank','br_berserk'];
+    [bRow1,bRow2].forEach(row=>row.forEach((id,i)=>{if(i<row.length-1&&PAD[id]&&PAD[row[i+1]]){
+      drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[row[i+1]].x,PAD[row[i+1]].y,isBought(id)?'#44cc44':'#224422',phase);}}));
+    if(PAD['br_rally']&&PAD['br_stim'])drawConveyorArrow(PAD['br_rally'].x,PAD['br_rally'].y,PAD['br_stim'].x,PAD['br_stim'].y,'#224422',phase);
+  }
+  if(OPEN.genroom){
+    drawFloor(WINGS.genroom,'#0b1803','#66aa22');roomLabel(WINGS.genroom,WINGS.genroom.label,'#88ff44');
+    const glow=(0.5+0.5*Math.sin(Date.now()/380))*0.05;
+    ctx.fillStyle=`rgba(180,255,40,${glow})`;ctx.fillRect(WINGS.genroom.x,WINGS.genroom.y,WINGS.genroom.w,WINGS.genroom.h);
+    const gRow1=['gen_up1','gen_up2','gen_over'],gRow2=['gen_beacon','gen_fusion'];
+    gRow1.forEach((id,i)=>{if(i<gRow1.length-1&&PAD[id]&&PAD[gRow1[i+1]]){
+      drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[gRow1[i+1]].x,PAD[gRow1[i+1]].y,isBought(id)||UPG[id].lv>0?'#88ff44':'#334422',phase);}});
+    gRow2.forEach((id,i)=>{if(i<gRow2.length-1&&PAD[id]&&PAD[gRow2[i+1]]){
+      drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[gRow2[i+1]].x,PAD[gRow2[i+1]].y,UPG[id].lv>0?'#88ff44':'#334422',phase);}});
+    if(PAD['gen_up1']&&PAD['gen_beacon'])drawConveyorArrow(PAD['gen_up1'].x,PAD['gen_up1'].y,PAD['gen_beacon'].x,PAD['gen_beacon'].y,'#334422',phase);
+  }
+  if(OPEN.lab){
+    drawFloor(WINGS.lab,'#041816','#228888');roomLabel(WINGS.lab,WINGS.lab.label,'#44ffdd');
+    const sl=(Date.now()%2800)/2800*WINGS.lab.h;
+    ctx.fillStyle='rgba(0,220,180,0.04)';ctx.fillRect(WINGS.lab.x,WINGS.lab.y+sl-3,WINGS.lab.w,6);
+    const lRow=['lab_range','lab_explo','lab_xray'];
+    lRow.forEach((id,i)=>{if(i<lRow.length-1&&PAD[id]&&PAD[lRow[i+1]]){
+      drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[lRow[i+1]].x,PAD[lRow[i+1]].y,isBought(id)||UPG[id].lv>0?'#44ffdd':'#224444',phase);}});
+    if(PAD['lab_xray']&&PAD['lab_drone'])drawConveyorArrow(PAD['lab_xray'].x,PAD['lab_xray'].y,PAD['lab_drone'].x,PAD['lab_drone'].y,'#224444',phase);
+    if(PAD['lab_drone']&&PAD['lab_nano'])drawConveyorArrow(PAD['lab_drone'].x,PAD['lab_drone'].y,PAD['lab_nano'].x,PAD['lab_nano'].y,UPG['lab_drone'].lv>0?'#44ffdd':'#224444',phase);
+  }
+  if(OPEN.market){
+    drawFloor(WINGS.market,'#070315','#774499');roomLabel(WINGS.market,WINGS.market.label,'#cc88ff');
+    ctx.fillStyle='rgba(180,80,255,0.04)';ctx.fillRect(WINGS.market.x,WINGS.market.y,WINGS.market.w,WINGS.market.h);
+    const mRow1=['mk_double','mk_rush','mk_loot'],mRow2=['mk_black','mk_god'];
+    mRow1.forEach((id,i)=>{if(i<mRow1.length-1&&PAD[id]&&PAD[mRow1[i+1]]){
+      drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[mRow1[i+1]].x,PAD[mRow1[i+1]].y,isBought(id)?'#cc88ff':'#442255',phase);}});
+    if(PAD['mk_loot']&&PAD['mk_black'])drawConveyorArrow(PAD['mk_loot'].x,PAD['mk_loot'].y,PAD['mk_black'].x,PAD['mk_black'].y,'#442255',phase);
+    mRow2.forEach((id,i)=>{if(i<mRow2.length-1&&PAD[id]&&PAD[mRow2[i+1]]){
+      drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[mRow2[i+1]].x,PAD[mRow2[i+1]].y,isBought(id)?'#cc88ff':'#442255',phase);}});
+  }
+
+  // Ghosts
+  if(!OPEN.tower)drawGhost(WINGS.tower,'#2266bb');
+  if(!OPEN.armory)drawGhost(WINGS.armory,'#aa2222');
+  if(!OPEN.barracks)drawGhost(WINGS.barracks,'#228822');
+  if(!OPEN.genroom)drawGhost(WINGS.genroom,'#66aa22');
+  if(!OPEN.lab)drawGhost(WINGS.lab,'#228888');
+  if(!OPEN.market)drawGhost(WINGS.market,'#774499');
+
+  // Flood glow
+  if(UPG.flood.bought){
+    const fg=ctx.createRadialGradient(CX,CY,60,CX,CY,600);
+    fg.addColorStop(0,'rgba(255,255,200,.055)');fg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=fg;ctx.beginPath();ctx.arc(CX,CY,600,0,Math.PI*2);ctx.fill();
+  }
+
+  // Walls
+  const wallLv=UPG.ar_wall1?UPG.ar_wall1.lv:0;
+  const wc=wallLv>=3?'#dd88ff':wallLv>=2?'#aa66ff':wallLv>=1?'#8844cc':'#5c2d99';
+  walls.forEach(w=>{
+    ctx.fillStyle=wc;ctx.fillRect(w.x,w.y,w.w,w.h);
+    ctx.strokeStyle='#cc99ff';ctx.lineWidth=1;ctx.strokeRect(w.x,w.y,w.w,w.h);
+  });
+  doors.forEach(d=>{
+    ctx.fillStyle=d.open?'rgba(68,160,255,.12)':'#101840';
+    ctx.fillRect(d.x,d.y,d.w,d.h);
+    ctx.strokeStyle='#44aaff';ctx.lineWidth=2;ctx.strokeRect(d.x,d.y,d.w,d.h);
+    ctx.fillStyle='#88ccff';ctx.font='12px VT323';ctx.textAlign='center';
+    ctx.fillText(d.open?'OPEN':'[E]DOOR',d.x+d.w/2,d.y-5);
+  });
+
+  // Mines
+  mines.forEach(m=>{
+    if(!m.alive)return;
+    m.blink+=0.05;
+    ctx.globalAlpha=0.55+0.45*Math.sin(m.blink);
+    ctx.fillStyle='#ff6600';ctx.beginPath();ctx.arc(m.x,m.y,9,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#ffaa44';ctx.lineWidth=1.5;ctx.stroke();
+    ctx.globalAlpha=1;
+  });
+
+  // Turrets
+  turrets.forEach(tu=>{
+    ctx.strokeStyle='rgba(255,70,50,.08)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(tu.x,tu.y,tu.range,0,Math.PI*2);ctx.stroke();
+    ctx.fillStyle='#38111e';ctx.beginPath();ctx.arc(tu.x,tu.y,24,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#bb3333';ctx.lineWidth=3;ctx.stroke();
+    ctx.fillStyle='#771e22';ctx.beginPath();ctx.arc(tu.x,tu.y,11,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#ff7755';ctx.lineWidth=7;
+    ctx.beginPath();ctx.moveTo(tu.x,tu.y);ctx.lineTo(tu.x+Math.cos(tu.angle)*34,tu.y+Math.sin(tu.angle)*34);ctx.stroke();
+  });
+
+  // Bullets
+  bullets.forEach(b=>{
+    ctx.globalAlpha=Math.min(1,b.life*2.5);ctx.fillStyle=b.col;
+    ctx.beginPath();ctx.arc(b.x,b.y,5,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+  });
+
+  // Beacon
+  if(UPG.beacon.bought||UPG.gen_beacon.lv>0){
+    const bx=HUB.x+HUB.w-90,by=HUB.y+80;
+    ctx.strokeStyle='#44ff88';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(bx,by-44);ctx.stroke();
+    const bp=(Date.now()%1400)/1400;
+    ctx.strokeStyle=`rgba(68,255,136,${1-bp})`;ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(bx,by-44,bp*40,0,Math.PI*2);ctx.stroke();
+  }
+
+  // Generator visual
+  if(UPG.gen_up1&&UPG.gen_up1.lv>0&&OPEN.genroom){
+    const G=WINGS.genroom,gx=G.x+G.w/2+100,gy=G.y+G.h/2+60;
+    const t=Date.now()/500;
+    ctx.strokeStyle='#88ff44';ctx.lineWidth=2;
+    for(let i=0;i<4;i++){
+      ctx.globalAlpha=0.15+0.15*(i/4);
+      ctx.beginPath();ctx.arc(gx,gy,18+i*22+Math.sin(t+i)*4,0,Math.PI*2);ctx.stroke();
+    }
+    ctx.globalAlpha=1;
+    ctx.font='28px serif';ctx.textAlign='center';ctx.fillText('⚡',gx,gy+10);
+  }
+
+  // Aura
+  if(P.aura){
+    const ag=ctx.createRadialGradient(P.x+P.w/2,P.y+P.h/2,0,P.x+P.w/2,P.y+P.h/2,P.auraR);
+    ag.addColorStop(0,'rgba(255,220,80,.22)');ag.addColorStop(1,'rgba(255,200,0,0)');
+    ctx.fillStyle=ag;ctx.beginPath();ctx.arc(P.x+P.w/2,P.y+P.h/2,P.auraR,0,Math.PI*2);ctx.fill();
+  }
+
+  // Drones
+  combatDrones.forEach(dr=>{
+    const dx=P.x+P.w/2+Math.cos(dr.angle)*dr.r,dy=P.y+P.h/2+Math.sin(dr.angle)*dr.r;
+    ctx.fillStyle='#00ffcc';ctx.beginPath();ctx.arc(dx,dy,9,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#88ffee';ctx.lineWidth=2;ctx.stroke();
+    ctx.globalAlpha=.18;ctx.strokeStyle='#00ffcc';ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(P.x+P.w/2,P.y+P.h/2,dr.r,0,Math.PI*2);ctx.stroke();ctx.globalAlpha=1;
+  });
+
+  // Invincibility ring
+  if(invincT>0){
+    ctx.globalAlpha=0.25+0.25*Math.sin(Date.now()/70);
+    ctx.strokeStyle='#ffd700';ctx.lineWidth=6;
+    ctx.beginPath();ctx.arc(P.x+P.w/2,P.y+P.h/2,32,0,Math.PI*2);ctx.stroke();
+    ctx.globalAlpha=1;
+  }
+
+  // Splash effects
+  splashPfx.forEach(s=>{
+    ctx.globalAlpha=(s.t/s.maxT)*.4;ctx.strokeStyle='#ff8800';ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(s.x+camX,s.y+camY,s.r,0,Math.PI*2);ctx.stroke();ctx.globalAlpha=1;
+  });
+
+  // ── PADS ────────────────────────────────────────────
+  const now=Date.now(),ppx=P.x+P.w/2,ppy=P.y+P.h/2;
+  for(const id in PAD){
+    if(!isVisible(id))continue;
+    const u=UPG[id];if(!u)continue;
+    const maxed=(u.type==='mul'&&u.lv>=u.max)||(u.type!=='mul'&&u.bought);
+    if(maxed)continue;
+
+    const pos=PAD[id];
+    const dist=Math.hypot(pos.x-ppx,pos.y-ppy);
+    const near=dist<80;
+    const buyable=isBuyableNow(id);
+    const aff=money>=getCost(id);
+    const req=reqMet(id);
+    const pulse=.65+.35*Math.sin(now/380+pos.x*.008);
+
+    let glowC='#330022',padC='rgba(14,6,28,.95)',ringC='#381545';
+    if(!req){glowC='#220022';ringC='#2a0a2a';}
+    else if(!buyable&&TUT.step<6){glowC='#1a1440';padC='rgba(10,8,22,.95)';ringC='#221840';}
+    else if(buyable&&aff){glowC='#8855ee';padC='rgba(24,10,44,.95)';ringC='#7744cc';}
+    else if(buyable&&!aff){glowC='#555500';padC='rgba(20,14,6,.95)';ringC='#554400';}
+    if(near&&buyable){glowC='#ffffff';ringC='#fff';}
+
+    ctx.globalAlpha=pulse*.28;ctx.fillStyle=glowC;
+    ctx.beginPath();ctx.arc(pos.x,pos.y,38,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+    ctx.fillStyle=padC;ctx.beginPath();ctx.arc(pos.x,pos.y,26,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle=ringC;ctx.lineWidth=near?3.5:1.8;ctx.stroke();
+
+    if(!req){
+      ctx.font='13px serif';ctx.textAlign='center';ctx.fillStyle='#442244';
+      ctx.fillText('🔒',pos.x,pos.y+4);
+    } else if(!buyable&&TUT.step<6){
+      // Tutorial locked — show faded icon
+      ctx.font='15px serif';ctx.textAlign='center';ctx.globalAlpha=.35;
+      ctx.fillStyle='#6644aa';ctx.fillText(u.icon,pos.x,pos.y+5);ctx.globalAlpha=1;
+      ctx.font='9px VT323';ctx.fillStyle='#443355';ctx.textAlign='center';
+      ctx.fillText('TUT',pos.x,pos.y+20);
+    } else {
+      ctx.font='16px serif';ctx.textAlign='center';
+      ctx.fillStyle=buyable?'#fff':'#554466';ctx.fillText(u.icon,pos.x,pos.y+6);
+      ctx.font='bold 11px VT323';
+      ctx.fillStyle=(aff&&buyable)?'#ffe566':'#553355';
+      ctx.fillText('$'+getCost(id),pos.x,pos.y+22);
+    }
+
+    if(near&&req&&buyable){
+      const lbl=u.type==='mul'?`[E] ${u.label} Lv${(u.lv||0)+1}`:`[E] ${u.label}`;
+      const msg=aff?lbl:'NEED $'+getCost(id);
+      const tw2=ctx.measureText(msg).width+20;
+      ctx.fillStyle='rgba(0,0,0,.82)';ctx.fillRect(pos.x-tw2/2,pos.y-67,tw2,22);
+      ctx.font='bold 14px VT323';ctx.textAlign='center';
+      ctx.fillStyle=aff?'#fff':'#ff5544';ctx.fillText(msg,pos.x,pos.y-51);
+    }
+  }
+
+  // ── WORLD COIN DROPS ──
+  drawCoinDrops();
+
+  // ── ENEMIES ──
+  enemies.forEach(e=>{
+    const wb=Math.sin(e.wob)*3;
+    ctx.fillStyle=e.col;ctx.beginPath();ctx.ellipse(e.x+e.w/2,e.y+e.h/2+wb,e.w/2+2,e.h/2+2,0,0,Math.PI*2);ctx.fill();
+    if(e.big){ctx.strokeStyle='rgba(255,255,255,.3)';ctx.lineWidth=2.5;ctx.stroke();}
+    ctx.fillStyle='#fff';
+    ctx.beginPath();ctx.arc(e.x+e.w*.3,e.y+e.h*.33+wb,e.big?5.5:3.5,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(e.x+e.w*.7,e.y+e.h*.33+wb,e.big?5.5:3.5,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#222';
+    ctx.beginPath();ctx.arc(e.x+e.w*.3,e.y+e.h*.33+wb,e.big?2.5:1.8,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(e.x+e.w*.7,e.y+e.h*.33+wb,e.big?2.5:1.8,0,Math.PI*2);ctx.fill();
+    if(e.hp<e.maxHp){
+      ctx.fillStyle='#1a1a1a';ctx.fillRect(e.x,e.y-11,e.w,5);
+      ctx.fillStyle=e.big?'#ff8800':'#ee3333';ctx.fillRect(e.x,e.y-11,e.w*(e.hp/e.maxHp),5);
+    }
+  });
+
+  // ── PLAYER ──
+  const px=P.x,py=P.y,pw=P.w,ph=P.h;
+  ctx.fillStyle='rgba(0,0,0,.18)';ctx.beginPath();ctx.ellipse(px+pw/2,py+ph+4,pw/2,6,0,0,Math.PI*2);ctx.fill();
+  const bodyC=UPG.suit&&UPG.suit.lv>0?'#88ccff':'#ffe566';
+  if(invincT>0)ctx.globalAlpha=0.6+0.4*Math.sin(Date.now()/55);
+  ctx.fillStyle=bodyC;ctx.fillRect(px,py,pw,ph);ctx.globalAlpha=1;
+  ctx.fillStyle='#886644';ctx.fillRect(px+2,py+ph*.5,pw-4,ph*.3);
+  ctx.fillStyle='#ffcc99';ctx.fillRect(px+4,py+2,pw-8,ph*.55);
+  ctx.fillStyle='#333';ctx.fillRect(px+7,py+9,4,3.5);ctx.fillRect(px+pw-11,py+9,4,3.5);
+  ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(px-14,py-22,62,15);
+  ctx.fillStyle='#ffe566';ctx.font='13px VT323';ctx.textAlign='center';ctx.fillText('Phil Collins',px+pw/2,py-9);
+  ctx.fillStyle='#1a1a1a';ctx.fillRect(px-2,py-32,pw+4,7);
+  ctx.fillStyle=P.hp>50?'#44ff88':P.hp>25?'#ffaa22':'#f44';
+  ctx.fillRect(px-2,py-32,(pw+4)*(P.hp/P.maxHp),7);
+
+  // Swing arc
+  if(WPN.sw){
+    const wcx=px+pw/2,wcy=py+ph/2,a=WPN.swA,ah=Math.PI*.48,prog=1-WPN.swT/WPN.swDur;
+    const wlv=UPG.weapon?UPG.weapon.lv:0;
+    ctx.globalAlpha=(1-prog*.7)*.22;ctx.fillStyle=wlv>=3?'#ffd700':wlv>=2?'#88ccff':'#ffaaaa';
+    ctx.beginPath();ctx.moveTo(wcx,wcy);ctx.arc(wcx,wcy,WPN.range,a-ah,a+ah);ctx.closePath();ctx.fill();
+    ctx.globalAlpha=(1-prog*.7)*.75;ctx.strokeStyle=wlv>=3?'#ffd700':'#fff';ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(wcx,wcy,WPN.range,a-ah,a+ah);ctx.stroke();
+    ctx.strokeStyle=wlv>=2?'#aaddff':'#ffcccc';ctx.lineWidth=wlv>=2?6:4;
+    ctx.beginPath();ctx.moveTo(wcx,wcy);ctx.lineTo(wcx+Math.cos(a)*WPN.range,wcy+Math.sin(a)*WPN.range);ctx.stroke();
+    ctx.globalAlpha=1;
+  } else {
+    const wcx=px+pw/2,wcy=py+ph/2;
+    const a=Math.atan2(mouse.y-(wcy-camY),mouse.x-(wcx-camX));
+    ctx.globalAlpha=.1;ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.setLineDash([5,8]);
+    ctx.beginPath();ctx.moveTo(wcx,wcy);ctx.lineTo(wcx+Math.cos(a)*WPN.range,wcy+Math.sin(a)*WPN.range);ctx.stroke();
+    ctx.setLineDash([]);ctx.globalAlpha=1;
+  }
+
+  // Particles
+  pfx.forEach(p=>{
+    ctx.globalAlpha=p.life/p.maxL;ctx.fillStyle=p.col;
+    ctx.beginPath();ctx.arc(p.x+camX,p.y+camY,p.r,0,Math.PI*2);ctx.fill();
+  });
+  ctx.globalAlpha=1;
+  ctx.restore();
+
+  drawMinimap();
+  document.getElementById('sMoney').textContent=Math.floor(money);
+  document.getElementById('sHp').textContent=Math.floor(P.hp);
+  drawBeltHUD();
+}
+
+// ── MINIMAP ────────────────────────────────────────────
+function drawMinimap(){
+  const mmW=MM,mmH=172;
+  mmc.clearRect(0,0,mmW,mmH);mmc.fillStyle='#050210';mmc.fillRect(0,0,mmW,mmH);
+  const sx=mmW/WW,sy=mmH/WH;
+  [{r:HUB,o:true,c:'rgba(90,40,160,.7)'},
+   {r:WINGS.tower,o:OPEN.tower,c:'rgba(30,70,160,.7)'},
+   {r:WINGS.armory,o:OPEN.armory,c:'rgba(160,30,30,.7)'},
+   {r:WINGS.barracks,o:OPEN.barracks,c:'rgba(30,120,30,.7)'},
+   {r:WINGS.genroom,o:OPEN.genroom,c:'rgba(70,140,30,.7)'},
+   {r:WINGS.lab,o:OPEN.lab,c:'rgba(30,140,120,.7)'},
+   {r:WINGS.market,o:OPEN.market,c:'rgba(110,50,160,.7)'},
+  ].forEach(({r,o,c})=>{mmc.fillStyle=o?c:'rgba(35,14,55,.15)';mmc.fillRect(r.x*sx,r.y*sy,r.w*sx,r.h*sy);});
+  for(const id in PAD){
+    if(!isVisible(id)||!canBuy(id))continue;
+    const p=PAD[id];
+    mmc.fillStyle=isBuyableNow(id)?'#9955ee':'#332244';
+    mmc.beginPath();mmc.arc(p.x*sx,p.y*sy,2.5,0,Math.PI*2);mmc.fill();
+  }
+  mmc.fillStyle='#f44';enemies.forEach(e=>{mmc.fillRect(e.x*sx-1.5,e.y*sy-1.5,4,4);});
+  mmc.fillStyle='#ffe566';mmc.fillRect(P.x*sx-3,P.y*sy-3,6,6);
+}
+
+// ── PANEL ──────────────────────────────────────────────
+function updPanel(){
+  const el=document.getElementById('pi');
+  function cls(id){
+    const u=UPG[id];
+    if(u.type==='mul'&&u.lv>=u.max)return'maxed';
+    if((u.type!=='mul')&&u.bought)return'owned';
+    if(!reqMet(id))return'seq-lock';
+    return'';
+  }
+  function badge(id){
+    const u=UPG[id];
+    if(u.type==='mul')return u.lv>=u.max?'★MAX':`${u.lv}/${u.max}`;
+    if(u.bought)return'✅';
+    if(!reqMet(id))return'🔒';
+    return'$'+getCost(id);
+  }
+  function sub(id){
+    const u=UPG[id];
+    if(u.bought&&u.type!=='mul')return'Purchased';
+    if(u.type==='mul'&&u.lv>=u.max)return'Maxed out';
+    if(!reqMet(id))return'Req: '+(UPG[u.req]?UPG[u.req].label:'?');
+    if(u.type==='inc')return'+'+u.iv+'/s · $'+u.cost;
+    if(u.type==='mul')return'Next: $'+getCost(id);
+    return'$'+u.cost;
+  }
+  function tipHTML(id){
+    const u=UPG[id];
+    const nc=u.type==='mul'&&u.lv<u.max?`<div class="tc">Next: $${getCost(id)}</div>`:'';
+    const req=!reqMet(id)?`<div class="treq">🔒 Buy ${UPG[u.req]?UPG[u.req].label:''} first</div>`:'';
+    const tut=!isBuyableNow(id)&&reqMet(id)&&TUT.step<6?'<div class="treq">📖 Complete tutorial step '+TUT.step+'</div>':'';
+    return`<div class="tip"><b>${u.icon} ${u.label}</b>${u.desc}${nc}${req}${tut}</div>`;
+  }
+  function row(id){const u=UPG[id],c=cls(id);return`<div class="pRow ${c}"><div class="ico">${u.icon}</div><div class="inf"><b>${u.label}</b><small>${sub(id)}</small></div><div class="bdg">${badge(id)}</div>${tipHTML(id)}</div>`;}
+  function sec(h,ids){return`<div class="pSec"><h3>${h}</h3>${ids.map(row).join('')}</div>`;}
+  el.innerHTML=
+    sec('💰 INCOME BELT',['i_scrap','i_moss','i_crystal','i_nest','i_star','i_plasma','i_dark','i_royalties'])+
+    sec('🏠 ROOM UNLOCKS',['r_tower','r_armory','r_barracks','r_genroom','r_lab','r_market'])+
+    sec('🛡️ BASE',['door','flood','beacon','medkit','shield','jammer'])+
+    sec('👤 PHIL',['music','boots','suit','weapon','aura','vampire','rally','stim'])+
+    sec('⚡ TOWER',['tw_scope1','tw_scope2','tw_early','tw_flare','tw_snipe'])+
+    sec('🔫 ARMORY',['ar_wall1','ar_turret1','ar_turret2','ar_mines','ar_flak','ar_shield'])+
+    sec('🪖 BARRACKS',['br_medic','br_combat','br_rally','br_stim','br_tank','br_berserk'])+
+    sec('⚡ GENERATOR',['gen_up1','gen_up2','gen_over','gen_beacon','gen_fusion'])+
+    sec('🔬 LAB',['lab_range','lab_explo','lab_xray','lab_drone','lab_nano'])+
+    sec('🏪 MARKET',['mk_double','mk_rush','mk_loot','mk_black','mk_god']);
+  requestAnimationFrame(()=>{
+    document.querySelectorAll('.pRow').forEach(row=>{
+      const tip=row.querySelector('.tip');if(!tip)return;
+      const rect=row.getBoundingClientRect();
+      const tp=Math.max(6,Math.min(window.innerHeight-175,rect.top));
+      tip.style.top=tp+'px';
+    });
+  });
+}
+
+// ── MESSAGES ───────────────────────────────────────────
+function showMsg(t){
+  const l=document.getElementById('msgLog');
+  const d=document.createElement('span');d.className='msg';d.textContent=t;
+  l.appendChild(d);setTimeout(()=>d.remove(),3400);
+}
+
+// ── LOOP ───────────────────────────────────────────────
+function loop(ts){
+  if(!running)return;
+  const dt=Math.min((ts-lastT)/1000,.1);lastT=ts;
+  incAcc+=income*dt;
+  if(incAcc>=1){money+=Math.floor(incAcc);incAcc%=1;}
+  updPlayer(dt);updCam();updEnemies(dt);updPfx(dt);updBeacon(dt);updCoinDrops(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ── START ──────────────────────────────────────────────
+function startGame(){
+  document.getElementById('titleScreen').style.display='none';
+  running=true;lastT=performance.now();
+  genTerrain();makePads();buildWalls();
+  P.x=CX-P.w/2;P.y=HUB.y+HUB.h+WT+55;
+  updPanel();updPassivesHUD();
+  TUT.step=1;
+  advanceTutorial(1);
+  showMsg('🛸 Phil Collins — Stranded on Boohbah Planet!');
+  requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>

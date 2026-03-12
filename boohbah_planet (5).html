@@ -127,7 +127,7 @@ body{background:#0a0a1a;overflow:hidden;font-family:'VT323',monospace;color:#e0d
   <div class="stat">❤️ <span id="sHp">100</span>/<span id="sMaxHp">100</span></div>
   <div class="stat">🗡️ <span id="sWeapon">👊 Fists</span></div>
   <div class="stat" id="sPassives" style="font-size:13px;color:#9977cc;min-height:20px;"></div>
-  <div class="stat"><small>WASD · Click=attack · E=buy pad</small></div>
+  <div class="stat"><small>WASD · Click=attack · E=buy/repair/gate</small></div>
 </div>
 
 <!-- CONVEYOR BELT INCOME DISPLAY -->
@@ -174,10 +174,90 @@ const MM=290;
 mmEl.width=MM;mmEl.height=172;
 
 // ── STATE ──────────────────────────────────────────────
-let running=false,money=9999999999999999,income=5,incAcc=0,lastT=0,beaconT=0;
+let running=false,money=2000,income=15,incAcc=0,lastT=0,beaconT=0;
 let camX=0,camY=0;
 let walls=[],doors=[],enemies=[],bullets=[],turrets=[],pfx=[],splashPfx=[];
 let mines=[],coinDrops=[],beltCoins=[];
+
+// ── BASE INTEGRITY SYSTEM ────────────────────────────
+// Walls have HP. Enemies ram them to break through. Player can repair.
+const WALL_MAX_HP=300;
+let wallSegHP={}; // key: "x,y" → {hp, maxHp}
+let wallsNeedRebuild=false;
+
+// Perimeter guard towers — placed at base corners, fire outward
+let perimTurrets=[];
+const PERIM_SPOTS=[
+  // 4 hub corners + midpoints of each side = 8 spots
+  {dx:-470,dy:-470},{dx:0,dy:-470},{dx:470,dy:-470},
+  {dx:470,dy:0},    {dx:470,dy:470},
+  {dx:0,dy:470},    {dx:-470,dy:470},{dx:-470,dy:0},
+];
+
+// Gates: multiple lockable gates around perimeter
+let gates=[];
+
+function initWallHP(){
+  wallSegHP={};
+  perimTurrets=[];
+  gates=[];
+}
+
+function getWallKey(w){return w.x+','+w.y+','+w.w+','+w.h;}
+
+function ensureWallHP(w){
+  const k=getWallKey(w);
+  if(!wallSegHP[k])wallSegHP[k]={hp:WALL_MAX_HP,maxHp:WALL_MAX_HP};
+  return wallSegHP[k];
+}
+
+function damageWall(w,dmg){
+  const seg=ensureWallHP(w);
+  seg.hp=Math.max(0,seg.hp-dmg);
+  if(seg.hp===0){
+    // Wall is breached — remove it temporarily
+    const idx=walls.indexOf(w);
+    if(idx>=0){walls.splice(idx,1);}
+    delete wallSegHP[getWallKey(w)];
+    showMsg('🧱 WALL BREACHED! Press E near rubble to repair! $50');
+  }
+}
+
+function repairWallsNear(px,py){
+  // Find any breached/damaged wall within range and restore it
+  let repaired=false;
+  const cost=50;
+  if(money<cost){showMsg('💸 Need $50 to repair wall!');return;}
+  // Rebuild walls fully
+  money-=cost;
+  buildWalls();
+  // Restore all HP to max
+  for(const k in wallSegHP)wallSegHP[k].hp=wallSegHP[k].maxHp;
+  repaired=true;
+  showMsg('🔧 Wall repaired! -$50');
+  spawnPfx(px-camX,py-camY,'#88ccff',20);
+}
+
+// Rebuild perimeter turrets based on what's been unlocked
+function rebuildPerimTurrets(){
+  perimTurrets=[];
+  const lv1=UPG.ar_turret1.lv, lv2=UPG.ar_turret2.lv;
+  if(lv1===0&&lv2===0) return;
+  // Place turrets at unlocked positions — each turret lv1 gives 2, lv2 gives 4 perimeter spots
+  const spots = lv2>0 ? PERIM_SPOTS : PERIM_SPOTS.filter((_,i)=>i%2===0);
+  spots.forEach((s,i)=>{
+    perimTurrets.push({
+      x:CX+s.dx, y:CY+s.dy,
+      t:Math.random()*1.5, // stagger fire times
+      angle:Math.atan2(s.dy,s.dx)+Math.PI, // aim outward
+      range: lv2>0 ? 380+lv2*80 : 280+lv1*70,
+      dmg: lv2>0 ? 30+lv2*18 : 18+lv1*12,
+      bRate: lv2>0 ? 1.2+lv2*0.4 : 0.7+lv1*0.2,
+      burst: lv2>0 ? 2 : 1,
+      lv: lv2>0 ? lv2+2 : lv1,
+    });
+  });
+}
 
 // ── CONVEYOR BELT COIN SYSTEM ──────────────────────────
 // coinDrops: {x,y,vx,vy,val,life,maxL,col} — float over world toward collector
@@ -342,25 +422,25 @@ const OPEN={tower:false,armory:false,barracks:false,genroom:false,lab:false,mark
 // ── UPGRADES — boosted economy ─────────────────────────
 const UPG={
   // INCOME — sequential chain, much higher income values
-  i_scrap:    {icon:'🪨',label:'Scrap Pile',    type:'inc',cost:40,   iv:4,   req:null,      desc:'Salvaged metal scrap. Your first source of income.'},
-  i_moss:     {icon:'🌿',label:'Alien Moss',    type:'inc',cost:90,   iv:9,   req:'i_scrap', desc:'Bioluminescent moss — sells for surprising amounts.'},
-  i_crystal:  {icon:'💎',label:'Crystal Vein',  type:'inc',cost:200,  iv:20,  req:'i_moss',  desc:'Alien crystals. Very rare and incredibly valuable.'},
-  i_nest:     {icon:'🪺',label:'Boohbah Nest',  type:'inc',cost:450,  iv:45,  req:'i_crystal',desc:'Alien investors pay you to NOT hatch the eggs.'},
-  i_star:     {icon:'⭐',label:'Star Fragment',  type:'inc',cost:950,  iv:90,  req:'i_nest',  desc:'Fallen star shards. The galaxy goes wild for these.'},
+  i_scrap:    {icon:'🪨',label:'Scrap Pile',    type:'inc',cost:25,   iv:6,   req:null,      desc:'Salvaged metal scrap. Your first source of income.'},
+  i_moss:     {icon:'🌿',label:'Alien Moss',    type:'inc',cost:60,   iv:14,   req:'i_scrap', desc:'Bioluminescent moss — sells for surprising amounts.'},
+  i_crystal:  {icon:'💎',label:'Crystal Vein',  type:'inc',cost:140,  iv:28,  req:'i_moss',  desc:'Alien crystals. Very rare and incredibly valuable.'},
+  i_nest:     {icon:'🪺',label:'Boohbah Nest',  type:'inc',cost:280,  iv:55,  req:'i_crystal',desc:'Alien investors pay you to NOT hatch the eggs.'},
+  i_star:     {icon:'⭐',label:'Star Fragment',  type:'inc',cost:600,  iv:100,  req:'i_nest',  desc:'Fallen star shards. The galaxy goes wild for these.'},
   i_plasma:   {icon:'🔵',label:'Plasma Core',   type:'inc',cost:2200, iv:180, req:'i_star',  desc:'Unstable plasma — somehow powers your whole empire.'},
   i_dark:     {icon:'🌑',label:'Dark Matter',   type:'inc',cost:5500, iv:380, req:'i_plasma', desc:'Incomprehensible substance. Incomprehensible income.'},
   i_royalties:{icon:'🎵',label:'Phil Royalties',type:'inc',cost:11000,iv:750, req:'i_dark',  desc:'"In the Air Tonight" royalties. Infinite generational wealth.'},
 
   // ROOM UNLOCK
-  r_tower:    {icon:'🗼',label:'Open Watch Tower',  type:'room',cost:200,rk:'tower',   req:null,         desc:'Opens north wall. Reveals the elevated Watch Tower wing.'},
-  r_armory:   {icon:'🔫',label:'Open Armory',       type:'room',cost:300,rk:'armory',  req:null,         desc:'Opens east wall. Reveals the heavily armed Armory.'},
-  r_barracks: {icon:'🪖',label:'Open Barracks',     type:'room',cost:300,rk:'barracks',req:null,         desc:'Opens west wall. Reveals the military Barracks.'},
-  r_genroom:  {icon:'⚡',label:'Open Generator Rm', type:'room',cost:400,rk:'genroom', req:null,         desc:'Opens south wall. Reveals the Generator complex.'},
+  r_tower:    {icon:'🗼',label:'Open Watch Tower',  type:'room',cost:120,rk:'tower',   req:null,         desc:'Opens north wall. Reveals the elevated Watch Tower wing.'},
+  r_armory:   {icon:'🔫',label:'Open Armory',       type:'room',cost:180,rk:'armory',  req:null,         desc:'Opens east wall. Reveals the heavily armed Armory.'},
+  r_barracks: {icon:'🪖',label:'Open Barracks',     type:'room',cost:180,rk:'barracks',req:null,         desc:'Opens west wall. Reveals the military Barracks.'},
+  r_genroom:  {icon:'⚡',label:'Open Generator Rm', type:'room',cost:220,rk:'genroom', req:null,         desc:'Opens south wall. Reveals the Generator complex.'},
   r_lab:      {icon:'🔬',label:'Open Research Lab', type:'room',cost:700,rk:'lab',     req:'r_genroom',  desc:'Opens Lab wing from Generator. Unlocks research chain.'},
   r_market:   {icon:'🏪',label:'Open Black Market', type:'room',cost:700,rk:'market',  req:'r_genroom',  desc:'Opens Market wing from Generator. Unlocks trade chain.'},
 
   // HUB BASE — sequential, cheaper starts
-  door:   {icon:'🚪',label:'Base Door',       type:'one',cost:100, req:null,    desc:'Lockable door on south entrance. Press E near it.'},
+  door:   {icon:'🚪',label:'Base Door',       type:'one',cost:60, req:null,    desc:'Lockable door on south entrance. Press E near it.'},
   flood:  {icon:'💡',label:'Floodlights',     type:'one',cost:200, req:'door',  desc:'Slows Boohbahs near hub by 45%. Very useful early.'},
   beacon: {icon:'📡',label:'Signal Beacon',   type:'one',cost:400, req:'flood', desc:'Supply drops: +120💰 every 25s.'},
   medkit: {icon:'🩺',label:'Med Station',     type:'one',cost:300, req:'beacon',desc:'+3 HP/s passive regeneration.'},
@@ -420,120 +500,324 @@ const UPG={
   mk_loot:    {icon:'🎁',label:'Loot Magnet',      type:'mul',cost:320,costM:2.3,max:4,lv:0,req:'mk_double',  desc:'Each level: +8💰 per kill.'},
   mk_black:   {icon:'🖤',label:'Black Op Contract',type:'one',cost:1400,req:'mk_loot',      desc:'Enemies drop +25💰 per kill permanently.'},
   mk_god:     {icon:'👑',label:'Phil Invincible',  type:'one',cost:4800,req:'mk_black',     desc:'Invincible for 10s every 30s. Phil is unstoppable.'},
+
+  // ROOM DEFENSES — doors + turrets in each wing (toggleable)
+  // Tower defenses
+  tw_door:    {icon:'🚪',label:'Tower Gate',       type:'one',cost:180,req:null, desc:'Lockable gate at tower entrance. Press E to toggle.'},
+  tw_laser:   {icon:'🔴',label:'Laser Door',       type:'one',cost:550,req:'tw_door', desc:'Electro-laser door burns Boohbahs entering tower. Toggle with E.'},
+  tw_sentry:  {icon:'🤖',label:'Tower Sentry',     type:'mul',cost:420,costM:2.2,max:3,lv:0,req:'tw_laser', desc:'Auto-turret in tower. Each level boosts damage and range.'},
+  // Armory defenses
+  ar_door:    {icon:'🚪',label:'Armory Gate',      type:'one',cost:180,req:null, desc:'Heavy blast door at armory entrance. Toggle with E.'},
+  ar_laser:   {icon:'🔴',label:'Laser Grid',       type:'one',cost:600,req:'ar_door', desc:'Laser grid across armory corridor. Incinerate intruders.'},
+  ar_sentry:  {icon:'🤖',label:'Armory Sentry',    type:'mul',cost:460,costM:2.2,max:3,lv:0,req:'ar_laser', desc:'Armory defense turret. High damage, short range.'},
+  // Barracks defenses
+  br_door:    {icon:'🚪',label:'Barracks Gate',    type:'one',cost:180,req:null, desc:'Reinforced barracks door. Toggle with E.'},
+  br_laser:   {icon:'🔴',label:'Stun Laser',       type:'one',cost:520,req:'br_door', desc:'Stun laser freezes Boohbahs in corridor for 2s then burns.'},
+  br_sentry:  {icon:'🤖',label:'Barracks Sentry',  type:'mul',cost:400,costM:2.2,max:3,lv:0,req:'br_laser', desc:'Fast-fire sentry. Lower damage, high fire rate.'},
+  // Generator defenses
+  gen_door:   {icon:'🚪',label:'Generator Gate',   type:'one',cost:200,req:null, desc:'Blast shield on generator entrance. Toggle with E.'},
+  gen_laser:  {icon:'🔴',label:'Plasma Door',      type:'one',cost:650,req:'gen_door', desc:'Plasma arc door. Deals massive damage to anything passing through.'},
+  gen_sentry: {icon:'🤖',label:'Gen Sentry',       type:'mul',cost:480,costM:2.2,max:3,lv:0,req:'gen_laser', desc:'Generator defense sentry. Powered by reactor for bonus damage.'},
+  // Lab defenses
+  lab_door:   {icon:'🚪',label:'Lab Airlock',      type:'one',cost:180,req:null, desc:'Sealed airlock at lab entrance. Toggle with E.'},
+  lab_laser:  {icon:'🔴',label:'Containment Laser',type:'one',cost:580,req:'lab_door', desc:'Research-grade laser containment. Burns and slows Boohbahs.'},
+  // Market defenses
+  mk_door:    {icon:'🚪',label:'Market Shutter',   type:'one',cost:160,req:null, desc:'Rolling shutter on market entrance. Toggle with E.'},
+  mk_laser:   {icon:'🔴',label:'Security Laser',   type:'one',cost:500,req:'mk_door', desc:'Anti-theft laser — double duty as anti-Boohbah.'},
 };
 
 const PAD={};
 const ROOM_PADS={
-  tower:   ['tw_scope1','tw_scope2','tw_early','tw_flare','tw_snipe'],
-  armory:  ['ar_wall1','ar_turret1','ar_turret2','ar_mines','ar_flak','ar_shield'],
-  barracks:['br_medic','br_combat','br_rally','br_stim','br_tank','br_berserk'],
-  genroom: ['gen_up1','gen_up2','gen_over','gen_beacon','gen_fusion'],
-  lab:     ['lab_range','lab_explo','lab_xray','lab_drone','lab_nano'],
-  market:  ['mk_double','mk_rush','mk_loot','mk_black','mk_god'],
+  tower:   ['tw_scope1','tw_scope2','tw_early','tw_flare','tw_snipe','tw_door','tw_laser','tw_sentry'],
+  armory:  ['ar_wall1','ar_turret1','ar_turret2','ar_mines','ar_flak','ar_shield','ar_door','ar_laser','ar_sentry'],
+  barracks:['br_medic','br_combat','br_rally','br_stim','br_tank','br_berserk','br_door','br_laser','br_sentry'],
+  genroom: ['gen_up1','gen_up2','gen_over','gen_beacon','gen_fusion','gen_door','gen_laser','gen_sentry'],
+  lab:     ['lab_range','lab_explo','lab_xray','lab_drone','lab_nano','lab_door','lab_laser'],
+  market:  ['mk_double','mk_rush','mk_loot','mk_black','mk_god','mk_door','mk_laser'],
 };
 
 let fusionBought=false,invincT=0,invincCD=30,aegisHP=0;
 let combatDrones=[];
+// Room defense state
+let laserDoors={}; // id -> {active: bool} — player toggles these
+let roomSentries=[]; // placed turrets in rooms
 
-// ── PAD PLACEMENT — conveyor-style rows per room ───────
+// ── ALLIES: Mrs. Keller and Mr. McCuen ──────────────
+const CODE_SNIPPETS=[
+  'if(x>0){','for(i=0;i<n;i++){','console.log(42);','return true;','var x=null;',
+  'while(true){','int main(){','def solve():','catch(e){}','arr.push(val);',
+  'x===undefined','<div>💥</div>','git commit -m','sudo rm -rf /','npm install',
+  'Hello World!','NullPointer!','404 Not Found','segfault :(','git merge hell',
+  'O(n²) uh oh','undefined!!','Stack Overflow','malloc(sizeof)','#include <pain>',
+];
+const ALLIES=[
+  {id:'keller', name:'Mrs. Keller', col:'#44ccff', x:0, y:0, angle:0,
+   hp:200, maxHp:200, speed:85, range:320, dmg:28, cd:1.2, t:0,
+   w:28, h:28, wob:0, active:false},
+  {id:'mccuen', name:'Mr. McCuen',  col:'#88ff44', x:0, y:0, angle:0,
+   hp:200, maxHp:200, speed:90, range:290, dmg:22, cd:0.9, t:0,
+   w:26, h:26, wob:0, active:false},
+];
+let codeProjectiles=[]; // {x,y,vx,vy,text,life,maxL,col,dmg}
+
+function initAllies(){
+  ALLIES[0].x=CX-80; ALLIES[0].y=HUB.y+HUB.h+WT+80; ALLIES[0].active=true;
+  ALLIES[1].x=CX+80; ALLIES[1].y=HUB.y+HUB.h+WT+80; ALLIES[1].active=true;
+  ALLIES.forEach(a=>{a.hp=a.maxHp;});
+}
+
+function updAllies(dt){
+  ALLIES.forEach(ally=>{
+    if(!ally.active||ally.hp<=0)return;
+    ally.wob+=dt*2;
+    ally.t-=dt;
+    // Follow player loosely
+    const tx=P.x+P.w/2+(ally.id==='keller'?-60:60);
+    const ty=P.y+P.h/2+40;
+    const dx=tx-ally.x, dy=ty-ally.y, d=Math.hypot(dx,dy);
+    if(d>40){
+      let mx=dx/d*ally.speed*dt, my=dy/d*ally.speed*dt;
+      let bx=false,by=false;
+      for(const w of walls){
+        if(aabb({x:ally.x+mx,y:ally.y,w:ally.w,h:ally.h},w))bx=true;
+        if(aabb({x:ally.x,y:ally.y+my,w:ally.w,h:ally.h},w))by=true;
+      }
+      if(!bx)ally.x+=mx;if(!by)ally.y+=my;
+    }
+    // Find nearest enemy and attack
+    if(ally.t<=0){
+      let tgt=null,tgtD=ally.range;
+      for(const e of enemies){
+        const ed=Math.hypot(e.x+e.w/2-ally.x,e.y+e.h/2-ally.y);
+        if(ed<tgtD){tgt=e;tgtD=ed;}
+      }
+      if(tgt){
+        ally.t=ally.cd;
+        const ang=Math.atan2(tgt.y+tgt.h/2-ally.y,tgt.x+tgt.w/2-ally.x);
+        ally.angle=ang;
+        const snippet=CODE_SNIPPETS[Math.random()*CODE_SNIPPETS.length|0];
+        codeProjectiles.push({
+          x:ally.x+ally.w/2, y:ally.y+ally.h/2,
+          vx:Math.cos(ang)*380, vy:Math.sin(ang)*380,
+          text:snippet, life:0.9, maxL:0.9,
+          col:ally.col, dmg:ally.dmg,
+          tgtId:tgt
+        });
+      }
+    }
+    // Take damage from enemies
+    for(const e of enemies){
+      if(aabb({x:ally.x,y:ally.y,w:ally.w,h:ally.h},e)){
+        ally.hp-=5*dt;
+        if(ally.hp<=0){ally.hp=0;ally.active=false;
+          showMsg('💀 '+ally.name+' is down! Respawning in 15s...');
+          ally._respawnT=15;
+        }
+      }
+    }
+    if(!ally.active&&ally._respawnT){
+      ally._respawnT-=dt;
+      if(ally._respawnT<=0){
+        ally.hp=ally.maxHp;ally.active=true;
+        ally.x=P.x+(Math.random()-.5)*80;ally.y=P.y+50;
+        showMsg('✅ '+ally.name+' is back!');
+      }
+    }
+  });
+  // Update code projectiles
+  for(let i=codeProjectiles.length-1;i>=0;i--){
+    const cp=codeProjectiles[i];
+    cp.x+=cp.vx*dt;cp.y+=cp.vy*dt;cp.life-=dt;
+    if(cp.life<=0){codeProjectiles.splice(i,1);continue;}
+    let hit=false;
+    for(let j=enemies.length-1;j>=0;j--){
+      const e=enemies[j];
+      if(aabb({x:cp.x-8,y:cp.y-8,w:16,h:16},e)){
+        e.hp-=cp.dmg;spawnPfx(cp.x-camX,cp.y-camY,cp.col,6);
+        if(e.hp<=0)killEnemy(j,e);
+        codeProjectiles.splice(i,1);hit=true;break;
+      }
+    }
+  }
+}
+
+function drawAllies(){
+  ALLIES.forEach(ally=>{
+    if(!ally.active)return;
+    const ax=ally.x-camX, ay=ally.y-camY;
+    const wb=Math.sin(ally.wob)*2;
+    // Shadow
+    ctx.fillStyle='rgba(0,0,0,.2)';ctx.beginPath();ctx.ellipse(ax+ally.w/2,ay+ally.h+3,ally.w/2,5,0,0,Math.PI*2);ctx.fill();
+    // Body
+    ctx.fillStyle=ally.col;ctx.fillRect(ax,ay+wb,ally.w,ally.h);
+    // Face
+    ctx.fillStyle='rgba(255,255,255,0.9)';ctx.fillRect(ax+4,ay+3+wb,ally.w-8,ally.h*0.5);
+    ctx.fillStyle='#222';
+    ctx.fillRect(ax+6,ay+7+wb,3,3);ctx.fillRect(ax+ally.w-9,ay+7+wb,3,3);
+    // Name tag
+    ctx.fillStyle='rgba(0,0,0,.7)';ctx.fillRect(ax-18,ay-20,ally.w+36,14);
+    ctx.fillStyle=ally.col;ctx.font='bold 11px VT323';ctx.textAlign='center';
+    ctx.fillText(ally.name,ax+ally.w/2,ay-8);
+    // HP bar
+    ctx.fillStyle='#111';ctx.fillRect(ax,ay-5,ally.w,4);
+    ctx.fillStyle=ally.hp/ally.maxHp>0.5?'#44ff88':'#ff4422';
+    ctx.fillRect(ax,ay-5,ally.w*(ally.hp/ally.maxHp),4);
+    // Attack direction line
+    if(ally.t>0&&ally.t<ally.cd*0.4){
+      ctx.strokeStyle=ally.col+'88';ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.moveTo(ax+ally.w/2,ay+ally.h/2+wb);
+      ctx.lineTo(ax+ally.w/2+Math.cos(ally.angle)*30,ay+ally.h/2+Math.sin(ally.angle)*30+wb);
+      ctx.stroke();
+    }
+  });
+  // Code projectiles
+  codeProjectiles.forEach(cp=>{
+    const al=cp.life/cp.maxL;
+    const sx=cp.x-camX, sy=cp.y-camY;
+    ctx.save();
+    ctx.globalAlpha=Math.min(1,al*1.5);
+    ctx.font='bold 13px VT323';ctx.textAlign='center';
+    ctx.fillStyle=cp.col;
+    ctx.shadowColor=cp.col;ctx.shadowBlur=6;
+    ctx.fillText(cp.text,sx,sy);
+    ctx.shadowBlur=0;
+    ctx.restore();
+    ctx.globalAlpha=1;
+  });
+}
+
+// ── PAD PLACEMENT — straight horizontal conveyor rows ──
+// Each room has ONE continuous belt: pads go L→R, then fold down to 2nd row
+// PAD_ROWS stores the ordered sequences for drawing belt arrows cleanly
+const PAD_ROWS={};
 function makePads(){
   function pl(id,x,y){PAD[id]={x,y};}
   const H=HUB;
 
-  // ── INCOME: 4-col grid, 2 rows across center-top of hub ──
+  // ── INCOME: single belt L→R across top half of hub, 2 rows ──
+  // Row 1 (left→right): scrap, moss, crystal, nest
+  // Row 2 (left→right): star, plasma, dark, royalties
+  const iColW=195, iX0=H.x+100, iY0=H.y+115, iY1=H.y+115+195;
   const iIds=['i_scrap','i_moss','i_crystal','i_nest','i_star','i_plasma','i_dark','i_royalties'];
-  const iColW=200, iStart=H.x+80;
-  iIds.forEach((id,i)=>{
-    const col=i%4, row=Math.floor(i/4);
-    pl(id, iStart+col*iColW, H.y+120+row*190);
-  });
+  iIds.forEach((id,i)=>pl(id, iX0+(i%4)*iColW, i<4?iY0:iY1));
+  PAD_ROWS.income=[iIds]; // for belt drawing
 
-  // ── ROOM UNLOCK PADS: against hub walls, one per wall ──
-  pl('r_tower',    CX,          H.y+60);       // north wall, centered
-  pl('r_armory',   H.x+H.w-70, CY-80);         // east wall
-  pl('r_barracks', H.x+70,     CY-80);          // west wall
-  pl('r_genroom',  CX,          H.y+H.h-60);   // south wall
-  // Lab + Market unlock pads: inside genroom, near genroom's side walls
+  // ── ROOM UNLOCKS: single horizontal row across hub middle ──
+  // Small pads in a labeled strip
+  const ruY=H.y+H.h/2-20;
+  pl('r_tower',    H.x+130, ruY);
+  pl('r_armory',   H.x+310, ruY);
+  pl('r_barracks', H.x+490, ruY);
+  pl('r_genroom',  H.x+670, ruY);
   const G=WINGS.genroom;
-  pl('r_lab',    G.x+80,       G.y+G.h/2);
-  pl('r_market', G.x+G.w-80,   G.y+G.h/2);
+  pl('r_lab',    G.x+100, G.y+G.h/2);
+  pl('r_market', G.x+G.w-100, G.y+G.h/2);
+  PAD_ROWS.rooms=[['r_tower','r_armory','r_barracks','r_genroom']];
 
-  // ── HUB BASE CHAIN: 2 columns of 3 in bottom-left quadrant ──
-  // Column 1: door, flood, beacon  Column 2: medkit, shield, jammer
-  const bc1x=H.x+120, bc2x=H.x+300;
-  const bcY=[H.y+H.h-180, H.y+H.h-360, H.y+H.h-540];
-  pl('door',   bc1x, bcY[0]);
-  pl('flood',  bc1x, bcY[1]);
-  pl('beacon', bc1x, bcY[2]);
-  pl('medkit', bc2x, bcY[0]);
-  pl('shield', bc2x, bcY[1]);
-  pl('jammer', bc2x, bcY[2]);
+  // ── HUB BASE CHAIN: single continuous belt, left side bottom ──
+  // door → flood → beacon → medkit → shield → jammer (L→R single row)
+  const bcY=H.y+H.h-175;
+  const bcX0=H.x+80, bcSp=140;
+  pl('door',   bcX0,         bcY);
+  pl('flood',  bcX0+bcSp,    bcY);
+  pl('beacon', bcX0+bcSp*2,  bcY);
+  pl('medkit', bcX0+bcSp*3,  bcY);
+  pl('shield', bcX0+bcSp*4,  bcY);
+  pl('jammer', bcX0+bcSp*5,  bcY);
+  PAD_ROWS.base=[['door','flood','beacon','medkit','shield','jammer']];
 
-  // ── HUB PHIL: 2 columns in bottom-right quadrant ──
-  // Column A (music chain): music→boots→suit→aura→vampire
-  // Column B (weapon chain): weapon→rally→stim
-  const phAx=H.x+H.w-380, phBx=H.x+H.w-180;
-  const phY=[H.y+H.h-180, H.y+H.h-360, H.y+H.h-540, H.y+H.h-720];
-  pl('music',   phAx, phY[0]);
-  pl('boots',   phAx, phY[1]);
-  pl('suit',    phAx, phY[2]);
-  pl('aura',    phAx, phY[3]);
-  pl('vampire', phAx, H.y+H.h-860); // 5th in col A — near top
-  pl('weapon',  phBx, phY[0]);
-  pl('rally',   phBx, phY[1]);
-  pl('stim',    phBx, phY[2]);
+  // ── HUB PHIL: two separate single-row belts, stacked ──
+  // Belt A (survival): music → boots → suit → aura → vampire
+  // Belt B (combat):   weapon → rally → stim
+  const phY0=H.y+H.h-360, phY1=H.y+H.h-520;
+  const phSp=155, phX0=H.x+80;
+  pl('music',   phX0,          phY0);
+  pl('boots',   phX0+phSp,     phY0);
+  pl('suit',    phX0+phSp*2,   phY0);
+  pl('aura',    phX0+phSp*3,   phY0);
+  pl('vampire', phX0+phSp*4,   phY0);
+  pl('weapon',  phX0,          phY1);
+  pl('rally',   phX0+phSp,     phY1);
+  pl('stim',    phX0+phSp*2,   phY1);
+  PAD_ROWS.philA=[['music','boots','suit','aura','vampire']];
+  PAD_ROWS.philB=[['weapon','rally','stim']];
 
-  // ── WATCH TOWER (700×600): 3 pads top row, 2 pads bottom row ──
+  // ── WATCH TOWER (700×600): single L→R belt ──
   const T=WINGS.tower;
-  pl('tw_scope1', T.x+120,      T.y+T.h*0.30);
-  pl('tw_scope2', T.x+120+210,  T.y+T.h*0.30);
-  pl('tw_early',  T.x+120+420,  T.y+T.h*0.30);
-  pl('tw_flare',  T.x+120+105,  T.y+T.h*0.70);
-  pl('tw_snipe',  T.x+120+315,  T.y+T.h*0.70);
+  const tSp=135, tX0=T.x+80, tY=T.y+T.h/2;
+  ['tw_scope1','tw_scope2','tw_early','tw_flare','tw_snipe'].forEach((id,i)=>
+    pl(id, tX0+i*tSp, tY));
+  PAD_ROWS.tower=[['tw_scope1','tw_scope2','tw_early','tw_flare','tw_snipe']];
 
-  // ── ARMORY (700×700): 3+3 grid evenly spaced ──
+  // ── ARMORY (700×700): 2 rows of 3 on clean belt ──
   const A=WINGS.armory;
-  const aSp=210, aX0=A.x+115;
-  pl('ar_wall1',   aX0,        A.y+160);
-  pl('ar_turret1', aX0+aSp,    A.y+160);
-  pl('ar_turret2', aX0+aSp*2,  A.y+160);
-  pl('ar_mines',   aX0,        A.y+160+230);
-  pl('ar_flak',    aX0+aSp,    A.y+160+230);
-  pl('ar_shield',  aX0+aSp*2,  A.y+160+230);
+  const aSp=190, aX0=A.x+80;
+  ['ar_wall1','ar_turret1','ar_turret2'].forEach((id,i)=>pl(id, aX0+i*aSp, A.y+200));
+  ['ar_mines','ar_flak','ar_shield'].forEach((id,i)=>pl(id, aX0+i*aSp, A.y+420));
+  PAD_ROWS.armory=[['ar_wall1','ar_turret1','ar_turret2'],['ar_mines','ar_flak','ar_shield']];
 
-  // ── BARRACKS (700×700): 3+3 grid evenly spaced ──
+  // ── BARRACKS (700×700): 2 rows of 3 ──
   const B=WINGS.barracks;
-  const bSp=210, bX0=B.x+115;
-  pl('br_medic',  bX0,        B.y+160);
-  pl('br_combat', bX0+bSp,    B.y+160);
-  pl('br_rally',  bX0+bSp*2,  B.y+160);
-  pl('br_stim',   bX0,        B.y+160+230);
-  pl('br_tank',   bX0+bSp,    B.y+160+230);
-  pl('br_berserk',bX0+bSp*2,  B.y+160+230);
+  const bSp=190, bX0=B.x+80;
+  ['br_medic','br_combat','br_rally'].forEach((id,i)=>pl(id, bX0+i*bSp, B.y+200));
+  ['br_stim','br_tank','br_berserk'].forEach((id,i)=>pl(id, bX0+i*bSp, B.y+420));
+  PAD_ROWS.barracks=[['br_medic','br_combat','br_rally'],['br_stim','br_tank','br_berserk']];
 
-  // ── GENERATOR (700×560): 3 top + 2 centered bottom ──
+  // ── GENERATOR (700×560): single row of 5 ──
   const GG=WINGS.genroom;
-  pl('gen_up1',    GG.x+120,       GG.y+155);
-  pl('gen_up2',    GG.x+120+210,   GG.y+155);
-  pl('gen_over',   GG.x+120+420,   GG.y+155);
-  pl('gen_beacon', GG.x+120+105,   GG.y+155+210);
-  pl('gen_fusion', GG.x+120+315,   GG.y+155+210);
+  const gSp=125, gX0=GG.x+80;
+  ['gen_up1','gen_up2','gen_over','gen_beacon','gen_fusion'].forEach((id,i)=>
+    pl(id, gX0+i*gSp, GG.y+GG.h/2));
+  PAD_ROWS.genroom=[['gen_up1','gen_up2','gen_over','gen_beacon','gen_fusion']];
 
-  // ── LAB (560×560): 3 top + 2 centered bottom ──
+  // ── LAB (560×560): single row of 5 ──
   const L=WINGS.lab;
-  pl('lab_range',  L.x+100,       L.y+140);
-  pl('lab_explo',  L.x+100+160,   L.y+140);
-  pl('lab_xray',   L.x+100+320,   L.y+140);
-  pl('lab_drone',  L.x+100+80,    L.y+140+210);
-  pl('lab_nano',   L.x+100+240,   L.y+140+210);
+  const lSp=100, lX0=L.x+75;
+  ['lab_range','lab_explo','lab_xray','lab_drone','lab_nano'].forEach((id,i)=>
+    pl(id, lX0+i*lSp, L.y+L.h/2));
+  PAD_ROWS.lab=[['lab_range','lab_explo','lab_xray','lab_drone','lab_nano']];
 
-  // ── MARKET (560×560): 3 top + 2 centered bottom ──
+  // ── MARKET (560×560): single row of 5 ──
   const M=WINGS.market;
-  pl('mk_double',  M.x+100,       M.y+140);
-  pl('mk_rush',    M.x+100+160,   M.y+140);
-  pl('mk_loot',    M.x+100+320,   M.y+140);
-  pl('mk_black',   M.x+100+80,    M.y+140+210);
-  pl('mk_god',     M.x+100+240,   M.y+140+210);
+  const mSp=100, mX0=M.x+75;
+  ['mk_double','mk_rush','mk_loot','mk_black','mk_god'].forEach((id,i)=>
+    pl(id, mX0+i*mSp, M.y+M.h/2));
+  PAD_ROWS.market=[['mk_double','mk_rush','mk_loot','mk_black','mk_god']];
+
+  // ── ROOM DEFENSE PADS: 3-pad row at bottom of each wing ──
+  // Tower defenses (bottom strip of tower)
+  pl('tw_door',   T.x+80,        T.y+T.h-100);
+  pl('tw_laser',  T.x+80+tSp,    T.y+T.h-100);
+  pl('tw_sentry', T.x+80+tSp*2,  T.y+T.h-100);
+  PAD_ROWS.towerDef=[['tw_door','tw_laser','tw_sentry']];
+
+  // Armory defenses
+  pl('ar_door',   aX0,           A.y+A.h-110);
+  pl('ar_laser',  aX0+aSp,       A.y+A.h-110);
+  pl('ar_sentry', aX0+aSp*2,     A.y+A.h-110);
+  PAD_ROWS.armoryDef=[['ar_door','ar_laser','ar_sentry']];
+
+  // Barracks defenses
+  pl('br_door',   bX0,           B.y+B.h-110);
+  pl('br_laser',  bX0+bSp,       B.y+B.h-110);
+  pl('br_sentry', bX0+bSp*2,     B.y+B.h-110);
+  PAD_ROWS.barracksDef=[['br_door','br_laser','br_sentry']];
+
+  // Generator defenses
+  pl('gen_door',  gX0,           GG.y+GG.h-100);
+  pl('gen_laser', gX0+gSp,       GG.y+GG.h-100);
+  pl('gen_sentry',gX0+gSp*2,     GG.y+GG.h-100);
+  PAD_ROWS.genroomDef=[['gen_door','gen_laser','gen_sentry']];
+
+  // Lab defenses
+  pl('lab_door',  lX0,           L.y+L.h-100);
+  pl('lab_laser', lX0+lSp,       L.y+L.h-100);
+  PAD_ROWS.labDef=[['lab_door','lab_laser']];
+
+  // Market defenses
+  pl('mk_door',   mX0,           M.y+M.h-100);
+  pl('mk_laser',  mX0+mSp,       M.y+M.h-100);
+  PAD_ROWS.marketDef=[['mk_door','mk_laser']];
 }
 
 // ── HELPERS ────────────────────────────────────────────
@@ -593,7 +877,14 @@ function buildWalls(){
     left: OPEN.barracks ?CY:null,
     bot:  CX,
   });
-  if(UPG.door.bought)doors.push({x:CX-GAP/2,y:HUB.y+HUB.h,w:GAP,h:WT,open:false});
+  if(UPG.door.bought){
+    // South gate (main entrance)
+    doors.push({x:CX-GAP/2,y:HUB.y+HUB.h,w:GAP,h:WT,open:false,label:'S'});
+  }
+  // Additional gates on open corridors
+  if(OPEN.tower) doors.push({x:CX-GAP/2,y:WINGS.tower.y+WINGS.tower.h,w:GAP,h:WT,open:true,label:'N',auto:true});
+  if(OPEN.armory) doors.push({x:HUB.x+HUB.w,y:CY-GAP/2,w:WT,h:GAP,open:true,label:'E',auto:true});
+  if(OPEN.barracks) doors.push({x:WINGS.barracks.x+WINGS.barracks.w,y:CY-GAP/2,w:WT,h:GAP,open:true,label:'W',auto:true});
   if(OPEN.tower)    box(WINGS.tower,   {bot:CX});
   if(OPEN.armory)   box(WINGS.armory,  {left:CY});
   if(OPEN.barracks) box(WINGS.barracks,{right:CY});
@@ -604,16 +895,54 @@ function buildWalls(){
   }
   if(OPEN.lab)    box(WINGS.lab,   {right:WINGS.lab.y+WINGS.lab.h/2});
   if(OPEN.market) box(WINGS.market,{left: WINGS.market.y+WINGS.market.h/2});
+  // Room door definitions for gates and laser zones
+  const ROOM_DOOR_SPECS={
+    tw_door: {x:CX-GAP/2, y:WINGS.tower.y+WINGS.tower.h, w:GAP, h:WT, wing:'tower'},
+    ar_door: {x:HUB.x+HUB.w, y:CY-GAP/2, w:WT, h:GAP, wing:'armory'},
+    br_door: {x:WINGS.barracks.x+WINGS.barracks.w, y:CY-GAP/2, w:WT, h:GAP, wing:'barracks'},
+    gen_door:{x:CX-GAP/2, y:HUB.y+HUB.h, w:GAP, h:WT, wing:'genroom'},
+    lab_door:{x:WINGS.lab.x+WINGS.lab.w, y:WINGS.lab.y+WINGS.lab.h/2-GAP/2, w:WT, h:GAP, wing:'lab'},
+    mk_door: {x:WINGS.genroom.x+WINGS.genroom.w, y:WINGS.market.y+WINGS.market.h/2-GAP/2, w:WT, h:GAP, wing:'market'},
+  };
+  for(const id in laserDoors){
+    const ld=laserDoors[id];
+    const spec=ROOM_DOOR_SPECS[id];
+    if(!spec||!OPEN[spec.wing])continue;
+    // Store zone for laser damage checks
+    ld.zone={x:spec.x,y:spec.y,w:spec.w,h:spec.h};
+    const laserId=id.replace('_door','_laser');
+    const laserActive=laserDoors[laserId]&&laserDoors[laserId].active;
+    if(laserActive)laserDoors[laserId].zone={x:spec.x,y:spec.y,w:spec.w,h:spec.h};
+    // Add door as wall if closed
+    if(!ld.active){
+      doors.push({x:spec.x,y:spec.y,w:spec.w,h:spec.h,open:false,label:id,roomDoor:true,
+        laser:laserActive});
+    }
+  }
 }
 
 function rebuildMines(){
   mines=[];
   const lv=UPG.ar_mines.lv;if(lv===0)return;
-  const count=lv*8,r=870+lv*100;
+  // Place mines in concentric rings AROUND the base perimeter in the open field
+  const count=lv*6+4;
   for(let i=0;i<count;i++){
-    const a=(i/count)*Math.PI*2;
-    mines.push({x:CX+Math.cos(a)*r,y:CY+Math.sin(a)*r,alive:true,blink:Math.random()*Math.PI*2});
+    const a=(i/count)*Math.PI*2+Math.random()*0.3;
+    // Spread from 500 to 1100 px from center - in the open field where enemies travel
+    const r=520+Math.random()*500+lv*80;
+    mines.push({x:CX+Math.cos(a)*r, y:CY+Math.sin(a)*r,
+      alive:true, blink:Math.random()*Math.PI*2,
+      respawnT:0 // when >0, counting down to respawn
+    });
   }
+}
+function respawnMines(dt){
+  if(UPG.ar_mines.lv===0)return;
+  mines.forEach(m=>{
+    if(m.alive)return;
+    m.respawnT-=dt;
+    if(m.respawnT<=0){m.alive=true;m.blink=0;}
+  });
 }
 function rebuildTurrets(){
   turrets=[];
@@ -622,11 +951,35 @@ function rebuildTurrets(){
   const lv1=UPG.ar_turret1.lv,lv2=UPG.ar_turret2.lv;
   if(lv1>0)turrets.push({x:A.x+A.w/2-110,y:A.y+A.h/2-80,t:0,angle:0,range:320+lv1*90,dmg:22+lv1*18,bRate:0.9+lv1*0.3,burst:1});
   if(lv2>0)turrets.push({x:A.x+A.w/2+110,y:A.y+A.h/2-80,t:0,angle:0,range:300+lv2*80,dmg:32+lv2*22,bRate:1.0+lv2*0.4,burst:3});
+  rebuildPerimTurrets();
 }
 function rebuildDrones(){
   combatDrones=[];
   const lv=UPG.lab_drone.lv;if(lv===0)return;
   for(let i=0;i<lv;i++)combatDrones.push({angle:(i/lv)*Math.PI*2,r:90});
+}
+function rebuildRoomSentries(){
+  roomSentries=[];
+  const roomDefs=[
+    {id:'tw_sentry',wing:'tower',   offX:0.3,offY:0.5},
+    {id:'tw_sentry',wing:'tower',   offX:0.7,offY:0.5},
+    {id:'ar_sentry',wing:'armory',  offX:0.5,offY:0.4},
+    {id:'ar_sentry',wing:'armory',  offX:0.5,offY:0.7},
+    {id:'br_sentry',wing:'barracks',offX:0.5,offY:0.4},
+    {id:'br_sentry',wing:'barracks',offX:0.5,offY:0.7},
+    {id:'gen_sentry',wing:'genroom',offX:0.5,offY:0.5},
+  ];
+  for(const def of roomDefs){
+    if(!OPEN[def.wing])continue;
+    const u=UPG[def.id];if(!u||u.lv===0)continue;
+    const wing=WINGS[def.wing];
+    roomSentries.push({
+      x:wing.x+wing.w*def.offX, y:wing.y+wing.h*def.offY,
+      t:Math.random()*2, angle:Math.random()*Math.PI*2,
+      range:180+u.lv*70, dmg:18+u.lv*14, bRate:0.8+u.lv*0.4, burst:1,
+      col:wing.accent
+    });
+  }
 }
 
 // ── TUTORIAL ───────────────────────────────────────────
@@ -718,6 +1071,18 @@ function applyOne(id){
       document.getElementById('sIncome').textContent=income.toFixed(1);},
     lab_xray: ()=>showMsg('🩻 X-Ray Vision active!'),
     lab_nano: ()=>{P.regen+=6;showMsg('🧬 Nano Swarm — +6 HP/s, +25% dmg!');},
+    tw_door:  ()=>{laserDoors['tw_door']={active:false};buildWalls();showMsg('🚪 Tower gate installed! E to toggle.');},
+    ar_door:  ()=>{laserDoors['ar_door']={active:false};buildWalls();showMsg('🚪 Armory gate installed!');},
+    br_door:  ()=>{laserDoors['br_door']={active:false};buildWalls();showMsg('🚪 Barracks gate installed!');},
+    gen_door: ()=>{laserDoors['gen_door']={active:false};buildWalls();showMsg('🚪 Generator gate installed!');},
+    lab_door: ()=>{laserDoors['lab_door']={active:false};buildWalls();showMsg('🚪 Lab airlock installed!');},
+    mk_door:  ()=>{laserDoors['mk_door']={active:false};buildWalls();showMsg('🚪 Market shutter installed!');},
+    tw_laser: ()=>{laserDoors['tw_laser']={active:true};showMsg('🔴 Tower laser — E to toggle!');},
+    ar_laser: ()=>{laserDoors['ar_laser']={active:true};showMsg('🔴 Armory laser grid online!');},
+    br_laser: ()=>{laserDoors['br_laser']={active:true};showMsg('🔴 Barracks stun laser online!');},
+    gen_laser:()=>{laserDoors['gen_laser']={active:true};showMsg('🔴 Plasma door activated!');},
+    lab_laser:()=>{laserDoors['lab_laser']={active:true};showMsg('🔴 Lab containment laser active!');},
+    mk_laser: ()=>{laserDoors['mk_laser']={active:true};showMsg('🔴 Security laser active!');},
     mk_double:()=>{income=5;for(const k in UPG){const u=UPG[k];if(u.type==='inc'&&u.bought)income+=u.iv*2;}
       showMsg('💸 DOUBLE DIP — income DOUBLED!');document.getElementById('sIncome').textContent=income.toFixed(1);},
     mk_rush:  ()=>{money+=800;showMsg('⚡ Cash Rush — +800💰!');},
@@ -747,6 +1112,10 @@ function applyMul(id){
     tw_scope1: ()=>{WPN.range+=35;},
     lab_range: ()=>{WPN.range+=35;},
     lab_drone: ()=>rebuildDrones(),
+    tw_sentry: ()=>rebuildRoomSentries(),
+    ar_sentry: ()=>rebuildRoomSentries(),
+    br_sentry: ()=>rebuildRoomSentries(),
+    gen_sentry:()=>rebuildRoomSentries(),
   };
   if(acts[id])acts[id]();
 }
@@ -833,7 +1202,66 @@ function killEnemy(i,e){
 // ── ENEMIES ────────────────────────────────────────────
 let eT=0,eRate=9,eDiff=1;
 const ECOLS=['#ff44aa','#ff8844','#aa44ff','#44ffcc','#ff4444','#ffdd44'];
+
+// ── BOSS BOOHBAHS ────────────────────────────────────
+// Each boss has unique ability and appears at escalating difficulty
+const BOSSES=[
+  {id:'zumbah',    name:'Zumbah',        title:'The Rebellion God',   col:'#ff2244',size:52, hp:600, speed:48,
+   ability:'rebellion', abilityCd:12, abilityT:0,
+   icon:'👹', desc:'Rallies boohbahs — sends 5 extras and boosts their speed!'},
+  {id:'jumbah',    name:'Jumbah',        title:'The Glutton',         col:'#ff8800',size:60, hp:800, speed:32,
+   ability:'bellflop',  abilityCd:8,  abilityT:0,
+   icon:'🐸', desc:'Charges up then belly-flops — OHKO if it lands!'},
+  {id:'jingbah',   name:'JingBah',       title:'The Healer',          col:'#44ff88',size:46, hp:450, speed:55,
+   ability:'heal',      abilityCd:6,  abilityT:0,
+   icon:'💚', desc:'Heals all nearby Boohbahs every few seconds.'},
+  {id:'humbah',    name:'Humbah',        title:'The Sunshine',        col:'#ffdd00',size:50, hp:700, speed:42,
+   ability:'sunshine',  abilityCd:10, abilityT:0,
+   icon:'☀️', desc:'Emits solar radiation — melts walls and deals aoe damage.'},
+  {id:'zingzing',  name:'ZingZingZingbah',title:'The Supreme Ruler',  col:'#cc44ff',size:70, hp:2000,speed:38,
+   ability:'supremacy', abilityCd:15, abilityT:0,
+   icon:'👑', desc:'Supreme ruler — grants infinite morale and endless slashes to all Boohbahs!'},
+];
+let activeBosses=[];
+let bossSpawnTimer=0;
+const BOSS_SPAWN_INTERVALS=[60,120,200,300,480]; // seconds until each boss spawns
+let bossesSpawned=0;
+let gameTime=0;
+let rebellionActive=0; // timer for zumbah rebellion buff
+let supremacyActive=0; // timer for zingzing supremacy
+
+// Boss and player images
+const IMG={};
+['humbah','jingbah','jumbah','zumbah','zingzingzingbah','philcollins'].forEach(n=>{
+  const img=new Image();img.src=n+'.jpg';IMG[n]=img;
+});
+
+function spawnBoss(bossIdx){
+  const b=BOSSES[bossIdx];
+  const s=Math.random()*4|0;
+  let bx,by;
+  if(s===0){bx=Math.random()*WW;by=50;}
+  else if(s===1){bx=WW-50;by=Math.random()*WH;}
+  else if(s===2){bx=Math.random()*WW;by=WH-50;}
+  else{bx=50;by=Math.random()*WH;}
+  const boss={...b, x:bx-b.size/2, y:by-b.size/2, w:b.size,h:b.size,
+    hp:b.hp*Math.max(1,eDiff*.5),maxHp:b.hp*Math.max(1,eDiff*.5),
+    isBoss:true, wob:0, st:0, jamT:0, big:true, abilityT:b.abilityCd*Math.random()};
+  activeBosses.push(boss);
+  enemies.push(boss);
+  showMsg('⚠️ '+b.name+' appears! '+b.title+'!');
+}
+
 function spawnEnemy(){
+  // Step 5 tutorial: spawn a very weak, slow boohbah nearby
+  if(TUT.step===5&&!TUT.killed){
+    const angle=Math.random()*Math.PI*2;
+    const dist=180+Math.random()*80;
+    enemies.push({x:P.x+Math.cos(angle)*dist,y:P.y+Math.sin(angle)*dist,
+      w:22,h:22,speed:28,hp:18,maxHp:18,
+      col:'#ff88aa',wob:0,st:0,jamT:0,big:false,tutorial:true});
+    return;
+  }
   const s=Math.random()*4|0;
   let ex,ey;
   if(s===0){ex=Math.random()*WW;ey=0;}
@@ -841,14 +1269,27 @@ function spawnEnemy(){
   else if(s===2){ex=Math.random()*WW;ey=WH;}
   else{ex=0;ey=Math.random()*WH;}
   const big=eDiff>2.5&&Math.random()<0.22;
+  // More aggressive over time: higher base speed, faster spawn
+  const aggrMult=1+Math.min(eDiff*0.12,1.8);
   enemies.push({x:ex,y:ey,w:big?44:24,h:big?44:24,
-    speed:(big?32:52)+Math.random()*28*eDiff,
-    hp:(big?150:34)*eDiff,maxHp:(big?150:34)*eDiff,
-    col:ECOLS[Math.random()*ECOLS.length|0],wob:Math.random()*6.28,st:0,jamT:0,big});
+    speed:((big?38:58)+Math.random()*32*eDiff)*aggrMult,
+    hp:(big?160:36)*eDiff,maxHp:(big?160:36)*eDiff,
+    col:ECOLS[Math.random()*ECOLS.length|0],wob:Math.random()*6.28,st:0,jamT:0,big,
+    moraleBuff:rebellionActive>0?1.35:supremacyActive>0?1.8:1});
 }
 function updEnemies(dt){
+  gameTime+=dt;
+  rebellionActive=Math.max(0,rebellionActive-dt);
+  supremacyActive=Math.max(0,supremacyActive-dt);
   eT+=dt;
-  if(eT>=eRate){eT=0;spawnEnemy();if(eRate>1.5)eRate-=0.04;eDiff=Math.min(eDiff+.035,10);}
+  // Spawn rate accelerates more aggressively over time
+  const spawnRate=eRate/(1+(gameTime/120)*0.4);
+  if(eT>=spawnRate){eT=0;spawnEnemy();if(eRate>1.2)eRate-=0.055;eDiff=Math.min(eDiff+.04,12);}
+  // Boss spawns
+  if(bossesSpawned<BOSS_SPAWN_INTERVALS.length&&gameTime>=BOSS_SPAWN_INTERVALS[bossesSpawned]){
+    spawnBoss(bossesSpawned%BOSSES.length);bossesSpawned++;
+  }
+  respawnMines(dt);
   const jamActive=UPG.jammer.bought,floodActive=UPG.flood.bought;
   // Flak
   if(UPG.ar_flak&&UPG.ar_flak.bought){
@@ -876,7 +1317,8 @@ function updEnemies(dt){
     if(e.st>0){e.st-=dt;e.wob+=dt*3;continue;}
     e.wob+=dt*3;
     const spd=e.speed*(e._slow?0.45:1);
-    const angle=jamActive&&e._jamA!=null?e._jamA:Math.atan2(P.y-e.y,P.x-e.x);
+    const angleToPlayer=Math.atan2(P.y-e.y,P.x-e.x);
+    const angle=jamActive&&e._jamA!=null?e._jamA:(e._deaggro?e._wanderA:angleToPlayer);
     const nx=e.x+Math.cos(angle)*spd*dt,ny=e.y+Math.sin(angle)*spd*dt;
     let bx=false,by=false;
     for(const w of walls){
@@ -884,12 +1326,83 @@ function updEnemies(dt){
       if(aabb({x:e.x,y:ny,w:e.w,h:e.h},w))by=true;
     }
     if(!bx)e.x=nx;if(!by)e.y=ny;
+    // Occasional de-aggro: wander randomly for a bit
+    if(!e._deaggroT){e._deaggroT=0;e._deaggroCD=8+Math.random()*12;}
+    e._deaggroCD-=dt;
+    if(e._deaggroCD<=0&&!e._deaggro){
+      e._deaggro=true;e._deaggroT=2+Math.random()*3;
+      e._wanderA=Math.random()*Math.PI*2;e._deaggroCD=10+Math.random()*15;
+    }
+    if(e._deaggro){e._deaggroT-=dt;if(e._deaggroT<=0)e._deaggro=false;}
     if(aabb(e,P)){
       if(invincT<=0){
         let dmg=9*dt;
         if(P.armor>0)dmg=Math.max(0,(9-P.armor*.09)*dt);
+        // Supremacy buff gives all boohbahs endless slash aoe
+        if(supremacyActive>0)dmg*=2.5;
         P.hp-=dmg;if(P.hp<0)P.hp=0;
         spawnPfx(P.x-camX,P.y-camY,'#ff4444',2);
+      }
+    }
+    // Boss ability updates
+    if(e.isBoss){
+      e.abilityT-=dt;
+      if(e.abilityT<=0){
+        e.abilityT=e.abilityCd;
+        if(e.ability==='rebellion'){
+          rebellionActive=15;
+          for(let s=0;s<5;s++)spawnEnemy();
+          showMsg('👹 ZUMBAH: REBELLION! Boohbahs go berserk!');
+          spawnPfx(e.x+e.w/2-camX,e.y+e.h/2-camY,'#ff2244',30);
+        } else if(e.ability==='bellflop'){
+          // Charge telegraph then slam
+          e.floppingT=1.5;e.flopTarget={x:P.x,y:P.y};
+          e.st=0.2;
+          showMsg('🐸 JUMBAH charges a BELLY FLOP — DODGE IT!');
+        } else if(e.ability==='heal'){
+          const healAmt=60*eDiff;
+          for(const other of enemies){
+            if(!other.isBoss&&Math.hypot(other.x-e.x,other.y-e.y)<380){
+              other.hp=Math.min(other.maxHp,other.hp+healAmt);
+            }
+          }
+          spawnPfx(e.x+e.w/2-camX,e.y+e.h/2-camY,'#44ff88',20);
+          showMsg('💚 JINGBAH heals nearby Boohbahs!');
+        } else if(e.ability==='sunshine'){
+          // Damage walls and player in large radius
+          for(const w of walls){
+            const wx=w.x+w.w/2,wy=w.y+w.h/2;
+            if(Math.hypot(wx-e.x-e.w/2,wy-e.y-e.h/2)<600)damageWall(w,40);
+          }
+          if(invincT<=0&&Math.hypot(P.x-e.x,P.y-e.y)<600){
+            P.hp-=30;spawnPfx(P.x-camX,P.y-camY,'#ffdd00',15);
+          }
+          spawnPfx(e.x+e.w/2-camX,e.y+e.h/2-camY,'#ffdd00',40);
+          showMsg('☀️ HUMBAH SUNSHINE — walls melting!');
+        } else if(e.ability==='supremacy'){
+          supremacyActive=20;
+          for(let s=0;s<8;s++)spawnEnemy();
+          showMsg('👑 ZINGZINGZINGBAH: SUPREMACY! Endless slashes!');
+          spawnPfx(e.x+e.w/2-camX,e.y+e.h/2-camY,'#cc44ff',50);
+        }
+      }
+      // Jumbah belly flop execution
+      if(e.floppingT){
+        e.floppingT-=dt;
+        if(e.floppingT<=0){
+          e.floppingT=0;
+          if(e.flopTarget&&Math.hypot(P.x-e.flopTarget.x,P.y-e.flopTarget.y)<140){
+            if(invincT<=0){P.hp=0;showMsg('💀 JUMBAH BELLY FLOP — OBLITERATED!');}
+          }
+          spawnPfx(e.flopTarget?e.flopTarget.x-camX:e.x-camX,
+                   e.flopTarget?e.flopTarget.y-camY:e.y-camY,'#ff8800',50);
+        } else {
+          // Move toward flopTarget fast
+          if(e.flopTarget){
+            const fd=Math.hypot(e.flopTarget.x-e.x,e.flopTarget.y-e.y);
+            if(fd>5){e.x+=(e.flopTarget.x-e.x)/fd*180*dt;e.y+=(e.flopTarget.y-e.y)/fd*180*dt;}
+          }
+        }
       }
     }
     if(P.aura){
@@ -901,7 +1414,7 @@ function updEnemies(dt){
     for(let m=mines.length-1;m>=0;m--){
       const mn=mines[m];if(!mn.alive)continue;
       if(Math.hypot(e.x+e.w/2-mn.x,e.y+e.h/2-mn.y)<46){
-        mn.alive=false;spawnPfx(mn.x-camX,mn.y-camY,'#ff8800',30);
+        mn.alive=false;mn.respawnT=18+Math.random()*8;spawnPfx(mn.x-camX,mn.y-camY,'#ff8800',30);
         for(let j=enemies.length-1;j>=0;j--){
           const e2=enemies[j];
           if(Math.hypot(e2.x+e2.w/2-mn.x,e2.y+e2.h/2-mn.y)<120){
@@ -911,7 +1424,7 @@ function updEnemies(dt){
       }
     }
   }
-  // Turrets
+  // Regular armory turrets
   turrets.forEach(tu=>{
     tu.t-=dt;
     let tgt=null,tgtD=tu.range;
@@ -923,6 +1436,48 @@ function updEnemies(dt){
       for(let b=0;b<tu.burst;b++){
         const sp=(b-(tu.burst-1)/2)*0.06;
         bullets.push({x:tu.x,y:tu.y,vx:Math.cos(tu.angle+sp)*580,vy:Math.sin(tu.angle+sp)*580,dmg:tu.dmg,life:0.7,col:'#ff8844'});
+      }
+    }
+  });
+  // Room sentries
+  roomSentries.forEach(tu=>{
+    tu.t-=dt;
+    let tgt=null,tgtD=tu.range;
+    for(const e of enemies){const d=Math.hypot(e.x+e.w/2-tu.x,e.y+e.h/2-tu.y);if(d<tgtD){tgt=e;tgtD=d;}}
+    if(!tgt){tu.angle+=dt*0.9;return;}
+    tu.angle=Math.atan2(tgt.y+tgt.h/2-tu.y,tgt.x+tgt.w/2-tu.x);
+    if(tu.t<=0){
+      tu.t=1/tu.bRate;
+      bullets.push({x:tu.x,y:tu.y,vx:Math.cos(tu.angle)*500,vy:Math.sin(tu.angle)*500,dmg:tu.dmg,life:0.8,col:'#88ff44'});
+    }
+  });
+  // Laser door damage
+  for(const id in laserDoors){
+    const ld=laserDoors[id];
+    if(!ld.active||!ld.zone)continue;
+    for(let i=enemies.length-1;i>=0;i--){
+      const e=enemies[i];
+      if(aabb({x:e.x,y:e.y,w:e.w,h:e.h},ld.zone)){
+        const ldmg=(id.includes('gen')?120:id.includes('br')?0:60)*dt;
+        e.hp-=ldmg;
+        if(id.includes('br')&&!e._stunned){e._stunned=2;e.st=2;}// stun
+        if(e.hp<=0)killEnemy(i,e);
+        else spawnPfx(e.x+e.w/2-camX,e.y+e.h/2-camY,'#ff2222',2);
+      }
+    }
+  }
+  // Perimeter guard turrets
+  perimTurrets.forEach(tu=>{
+    tu.t-=dt;
+    let tgt=null,tgtD=tu.range;
+    for(const e of enemies){const d=Math.hypot(e.x+e.w/2-tu.x,e.y+e.h/2-tu.y);if(d<tgtD){tgt=e;tgtD=d;}}
+    if(!tgt){tu.angle+=dt*0.8;return;}
+    tu.angle=Math.atan2(tgt.y+tgt.h/2-tu.y,tgt.x+tgt.w/2-tu.x);
+    if(tu.t<=0){
+      tu.t=1/tu.bRate;
+      for(let b=0;b<tu.burst;b++){
+        const sp=(b-(tu.burst-1)/2)*0.05;
+        bullets.push({x:tu.x,y:tu.y,vx:Math.cos(tu.angle+sp)*520,vy:Math.sin(tu.angle+sp)*520,dmg:tu.dmg,life:0.9,col:'#44aaff'});
       }
     }
   });
@@ -1007,18 +1562,46 @@ function updPlayer(dt){
 
   if(K['e']||K['E']){
     K['e']=false;K['E']=false;
+    let doorToggled=false;
     for(const d of doors){
-      if(Math.hypot(d.x+d.w/2-P.x-P.w/2,d.y+d.h/2-P.y-P.h/2)<90){
-        d.open=!d.open;showMsg(d.open?'🚪 Door open!':'🔒 Door locked!');break;
+      if(!d.auto&&Math.hypot(d.x+d.w/2-P.x-P.w/2,d.y+d.h/2-P.y-P.h/2)<90){
+        d.open=!d.open;showMsg(d.open?'🚪 Gate open!':'🔒 Gate locked!');doorToggled=true;
+        if(d.label&&laserDoors[d.label])laserDoors[d.label].active=!d.open;
+        buildWalls();break;
       }
     }
-    let bestId=null,bestD=80;
-    for(const id in PAD){
-      if(!canBuy(id)||!isVisible(id))continue;
-      const p=PAD[id],d=Math.hypot(p.x-P.x-P.w/2,p.y-P.y-P.h/2);
-      if(d<bestD){bestId=id;bestD=d;}
+    // Laser door toggle by proximity
+    if(!doorToggled){
+      for(const id in laserDoors){
+        if(!id.includes('_laser'))continue;
+        const ld=laserDoors[id];if(!ld.zone)continue;
+        const z=ld.zone;
+        if(Math.hypot(z.x+z.w/2-P.x-P.w/2,z.y+z.h/2-P.y-P.h/2)<110){
+          ld.active=!ld.active;doorToggled=true;
+          showMsg(ld.active?'🔴 Laser ARMED — burns intruders!':'⬜ Laser disarmed');
+          break;
+        }
+      }
     }
-    if(bestId)tryBuy(bestId);
+    if(!doorToggled){
+      let nearDamaged=false;
+      for(const w of walls){
+        const k=getWallKey(w);const seg=wallSegHP[k];
+        if(seg&&seg.hp<seg.maxHp){
+          if(Math.hypot(w.x+w.w/2-P.x-P.w/2,w.y+w.h/2-P.y-P.h/2)<130){nearDamaged=true;break;}
+        }
+      }
+      if(nearDamaged){repairWallsNear(P.x+P.w/2,P.y+P.h/2);}
+      else{
+        let bestId=null,bestD=80;
+        for(const id in PAD){
+          if(!canBuy(id)||!isVisible(id))continue;
+          const p=PAD[id],d=Math.hypot(p.x-P.x-P.w/2,p.y-P.y-P.h/2);
+          if(d<bestD){bestId=id;bestD=d;}
+        }
+        if(bestId)tryBuy(bestId);
+      }
+    }
   }
 }
 
@@ -1068,23 +1651,70 @@ function drawCorr(side){
   ctx.fillStyle='#0d0820';ctx.fillRect(r.x,r.y,r.w,r.h);
 }
 
-// Draw conveyor belt arrow between two pads (tycoon style)
-function drawConveyorArrow(x1,y1,x2,y2,col,phase){
-  const dx=x2-x1,dy=y2-y1,d=Math.hypot(dx,dy);
-  if(d<10)return;
-  const ux=dx/d,uy=dy/d;
-  // Belt body
+// Draw a tycoon-style belt track connecting a list of pad positions
+function drawBeltTrack(ids, col, phase){
+  if(!ids||ids.length<2)return;
+  // Check if entire belt is completed (all maxed/bought)
+  const allDone=ids.every(id=>{
+    const u=UPG[id];if(!u)return true;
+    return (u.type==='mul'&&u.lv>=u.max)||(u.type!=='mul'&&u.bought);
+  });
+  const visIds=ids.filter(id=>PAD[id]);
+  if(visIds.length<2)return;
   ctx.save();
-  ctx.strokeStyle=col+'44';ctx.lineWidth=12;ctx.setLineDash([14,10]);
-  ctx.lineDashOffset=-phase*24;
+  // Track line — dimmed if complete, animated if active
+  if(allDone){
+    ctx.strokeStyle=col+'18';ctx.lineWidth=10;ctx.setLineDash([]);
+  } else {
+    ctx.strokeStyle=col+'33';ctx.lineWidth=18;ctx.setLineDash([]);
+  }
+  ctx.lineCap='round';
+  ctx.beginPath();let first=true;
+  visIds.forEach(id=>{const p=PAD[id];if(first){ctx.moveTo(p.x,p.y);first=false;}else ctx.lineTo(p.x,p.y);});
+  ctx.stroke();
+  if(!allDone){
+    // Animated dashes
+    ctx.strokeStyle=col+'66';ctx.lineWidth=8;ctx.setLineDash([22,16]);
+    ctx.lineDashOffset=-(phase*38%38);
+    ctx.beginPath();first=true;
+    visIds.forEach(id=>{const p=PAD[id];if(first){ctx.moveTo(p.x,p.y);first=false;}else ctx.lineTo(p.x,p.y);});
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // Chevrons only on incomplete sections
+    for(let i=0;i<visIds.length-1;i++){
+      const id1=visIds[i],id2=visIds[i+1];
+      const u1=UPG[id1];
+      const done1=(u1.type==='mul'&&u1.lv>=u1.max)||(u1.type!=='mul'&&u1.bought);
+      if(done1)continue; // skip arrow after bought pad
+      const p1=PAD[id1],p2=PAD[id2];
+      const dx=p2.x-p1.x,dy=p2.y-p1.y,d=Math.hypot(dx,dy);
+      const ux=dx/d,uy=dy/d,mx=(p1.x+p2.x)/2,my=(p1.y+p2.y)/2;
+      const px2=-uy*9,py2=ux*9;
+      ctx.fillStyle=col+'99';
+      ctx.beginPath();ctx.moveTo(mx+ux*12,my+uy*12);ctx.lineTo(mx-ux*10+px2,my-uy*10+py2);ctx.lineTo(mx-ux*10-px2,my-uy*10-py2);ctx.closePath();ctx.fill();
+    }
+  } else {
+    ctx.setLineDash([]);
+    // Completed belt: draw a faint ✓ in the middle
+    const mid=visIds[Math.floor(visIds.length/2)];
+    if(mid){const mp=PAD[mid];ctx.fillStyle=col+'55';ctx.font='bold 18px VT323';ctx.textAlign='center';ctx.fillText('✓',mp.x,mp.y-35);}
+  }
+  ctx.restore();
+}
+
+function drawConveyorArrow(x1,y1,x2,y2,col,phase){
+  // Legacy single-arrow helper — now used for cross-row connectors
+  ctx.save();
+  ctx.strokeStyle=col+'33';ctx.lineWidth=10;ctx.setLineDash([12,9]);
+  ctx.lineDashOffset=-(phase*21%21);
   ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
   ctx.setLineDash([]);
-  // Arrow head
-  ctx.strokeStyle=col+'88';ctx.lineWidth=3;ctx.fillStyle=col+'55';
-  const mx=(x1+x2)/2+ux*8,my=(y1+y2)/2+uy*8;
-  const px=-uy*8,py=ux*8;
-  ctx.beginPath();ctx.moveTo(mx,my);ctx.lineTo(mx-ux*14+px,my-uy*14+py);ctx.lineTo(mx-ux*14-px,my-uy*14-py);ctx.closePath();
-  ctx.fill();ctx.stroke();
+  const dx=x2-x1,dy=y2-y1,d=Math.hypot(dx,dy);
+  if(d<5){ctx.restore();return;}
+  const ux=dx/d,uy=dy/d,mx=(x1+x2)/2,my=(y1+y2)/2;
+  const px2=-uy*8,py2=ux*8;
+  ctx.fillStyle=col+'88';
+  ctx.beginPath();ctx.moveTo(mx+ux*10,my+uy*10);ctx.lineTo(mx-ux*8+px2,my-uy*8+py2);ctx.lineTo(mx-ux*8-px2,my-uy*8-py2);ctx.closePath();ctx.fill();
   ctx.restore();
 }
 
@@ -1126,104 +1756,67 @@ function draw(){
   const phase=(Date.now()/1000)%1;
   drawFloor(HUB,'#18092e','#aa66ff');roomLabel(HUB,'🛸 Main Hub','#aa66ff');
 
-  // INCOME CONVEYOR BELT — arrows L→R per row, then row connector down
+  // INCOME BELT — single continuous track, row1 L→R, connector, row2 L→R
   const iIds=['i_scrap','i_moss','i_crystal','i_nest','i_star','i_plasma','i_dark','i_royalties'];
-  for(let row=0;row<2;row++){
-    for(let col=0;col<3;col++){
-      const idx=row*4+col,nxt=idx+1;
-      if(nxt<iIds.length&&Math.floor(nxt/4)===row){
-        const p1=PAD[iIds[idx]],p2=PAD[iIds[nxt]];
-        if(p1&&p2)drawConveyorArrow(p1.x,p1.y,p2.x,p2.y,UPG[iIds[idx]].bought?'#ffe566':'#553366',phase);
-      }
-    }
-    // Row connector: last of row → first of next row
-    const endOfRow=PAD[iIds[row*4+3]],startNextRow=PAD[iIds[(row+1)*4]];
-    if(endOfRow&&startNextRow&&(row+1)*4<iIds.length)
-      drawConveyorArrow(endOfRow.x,endOfRow.y,startNextRow.x,startNextRow.y,UPG[iIds[row*4+3]].bought?'#ffe566':'#553366',phase);
-  }
-  // BASE CHAIN arrows (col1 top→down, then col1→col2 connector, col2 top→down)
-  const bc=['door','flood','beacon','medkit','shield','jammer'];
-  [[0,1],[1,2]].forEach(([a,b])=>{
-    const p1=PAD[bc[a]],p2=PAD[bc[b]];
-    if(p1&&p2)drawConveyorArrow(p1.x,p1.y,p2.x,p2.y,UPG[bc[a]].bought?'#88ccff':'#223344',phase);
-  });
-  // beacon → medkit (col1 to col2)
-  if(PAD['beacon']&&PAD['medkit'])drawConveyorArrow(PAD['beacon'].x,PAD['beacon'].y,PAD['medkit'].x,PAD['medkit'].y,UPG['beacon'].bought?'#88ccff':'#223344',phase);
-  [[3,4],[4,5]].forEach(([a,b])=>{
-    const p1=PAD[bc[a]],p2=PAD[bc[b]];
-    if(p1&&p2)drawConveyorArrow(p1.x,p1.y,p2.x,p2.y,UPG[bc[a]].bought?'#88ccff':'#223344',phase);
-  });
-  // PHIL arrows col A
-  const phA=['music','boots','suit','aura','vampire'];
-  phA.forEach((id,i)=>{if(i<phA.length-1&&PAD[id]&&PAD[phA[i+1]])
-    drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[phA[i+1]].x,PAD[phA[i+1]].y,UPG[id].bought||UPG[id].lv>0?'#ff88cc':'#442244',phase);});
-  // Phil col B
-  const phB=['weapon','rally','stim'];
-  phB.forEach((id,i)=>{if(i<phB.length-1&&PAD[id]&&PAD[phB[i+1]])
-    drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[phB[i+1]].x,PAD[phB[i+1]].y,UPG[id].bought||UPG[id].lv>0?'#ff88cc':'#442244',phase);});
+  drawBeltTrack(iIds.slice(0,4),'#ffe566',phase);
+  drawBeltTrack(iIds.slice(4),'#ffaa22',phase);
+  // Row connector
+  if(PAD['i_nest']&&PAD['i_star'])drawConveyorArrow(PAD['i_nest'].x,PAD['i_nest'].y,PAD['i_star'].x,PAD['i_star'].y,UPG['i_nest'].bought?'#ffe566':'#553366',phase);
+
+  // ROOM UNLOCK belt — labeled strip
+  drawBeltTrack(['r_tower','r_armory','r_barracks','r_genroom'],'#cc88ff',phase);
+
+  // BASE CHAIN belt
+  drawBeltTrack(['door','flood','beacon','medkit','shield','jammer'],'#88ccff',phase);
+
+  // PHIL belts
+  drawBeltTrack(['music','boots','suit','aura','vampire'],'#ff88cc',phase);
+  drawBeltTrack(['weapon','rally','stim'],'#ff8844',phase);
 
   // Room floor + belt arrows
   if(OPEN.tower){
     drawFloor(WINGS.tower,'#050c18','#2266bb');roomLabel(WINGS.tower,WINGS.tower.label,'#4488ff');
     ctx.fillStyle='rgba(30,60,140,0.04)';ctx.fillRect(WINGS.tower.x,WINGS.tower.y,WINGS.tower.w,WINGS.tower.h);
-    // Belt: single horizontal line for scope chain
-    const tw=['tw_scope1','tw_scope2','tw_early'];
-    tw.forEach((id,i)=>{if(i<tw.length-1&&PAD[id]&&PAD[tw[i+1]]){
-      drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[tw[i+1]].x,PAD[tw[i+1]].y,
-        UPG[id].bought||UPG[id].lv>0?'#4488ff':'#222255',phase);}});
-    if(PAD['tw_early']&&PAD['tw_flare'])drawConveyorArrow(PAD['tw_early'].x,PAD['tw_early'].y,PAD['tw_flare'].x,PAD['tw_flare'].y,'#334488',phase);
-    if(PAD['tw_flare']&&PAD['tw_snipe'])drawConveyorArrow(PAD['tw_flare'].x,PAD['tw_flare'].y,PAD['tw_snipe'].x,PAD['tw_snipe'].y,UPG['tw_flare'].lv>0?'#4488ff':'#334488',phase);
+    drawBeltTrack(['tw_scope1','tw_scope2','tw_early','tw_flare','tw_snipe'],'#4488ff',phase);
+    if(OPEN.tower)drawBeltTrack(['tw_door','tw_laser','tw_sentry'],'#44aaff',phase);
   }
   if(OPEN.armory){
     drawFloor(WINGS.armory,'#180403','#aa2222');roomLabel(WINGS.armory,WINGS.armory.label,'#ff4422');
     ctx.fillStyle='rgba(200,20,0,0.03)';ctx.fillRect(WINGS.armory.x,WINGS.armory.y,WINGS.armory.w,WINGS.armory.h);
-    // Two belt rows
-    const aRow1=['ar_wall1','ar_turret1','ar_turret2'],aRow2=['ar_mines','ar_flak','ar_shield'];
-    [aRow1,aRow2].forEach(row=>row.forEach((id,i)=>{if(i<row.length-1&&PAD[id]&&PAD[row[i+1]]){
-      drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[row[i+1]].x,PAD[row[i+1]].y,
-        isBought(id)?'#ff4422':'#552222',phase);}}));
-    if(PAD['ar_wall1']&&PAD['ar_mines'])drawConveyorArrow(PAD['ar_wall1'].x,PAD['ar_wall1'].y,PAD['ar_mines'].x,PAD['ar_mines'].y,'#443322',phase);
+    drawBeltTrack(['ar_wall1','ar_turret1','ar_turret2'],'#ff4422',phase);
+    drawBeltTrack(['ar_mines','ar_flak','ar_shield'],'#ff6622',phase);
+    if(PAD['ar_turret2']&&PAD['ar_mines'])drawConveyorArrow(PAD['ar_turret2'].x,PAD['ar_turret2'].y,PAD['ar_mines'].x,PAD['ar_mines'].y,'#882211',phase);
+    drawBeltTrack(['ar_door','ar_laser','ar_sentry'],'#ff8844',phase);
   }
   if(OPEN.barracks){
     drawFloor(WINGS.barracks,'#041606','#228822');roomLabel(WINGS.barracks,WINGS.barracks.label,'#44cc44');
     ctx.globalAlpha=0.04;ctx.fillStyle='#003300';
     for(let s=0;s<8;s++)ctx.fillRect(WINGS.barracks.x+s*88,WINGS.barracks.y,44,WINGS.barracks.h);
     ctx.globalAlpha=1;
-    const bRow1=['br_medic','br_combat','br_rally'],bRow2=['br_stim','br_tank','br_berserk'];
-    [bRow1,bRow2].forEach(row=>row.forEach((id,i)=>{if(i<row.length-1&&PAD[id]&&PAD[row[i+1]]){
-      drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[row[i+1]].x,PAD[row[i+1]].y,isBought(id)?'#44cc44':'#224422',phase);}}));
+    drawBeltTrack(['br_medic','br_combat','br_rally'],'#44cc44',phase);
+    drawBeltTrack(['br_stim','br_tank','br_berserk'],'#66dd22',phase);
     if(PAD['br_rally']&&PAD['br_stim'])drawConveyorArrow(PAD['br_rally'].x,PAD['br_rally'].y,PAD['br_stim'].x,PAD['br_stim'].y,'#224422',phase);
+    drawBeltTrack(['br_door','br_laser','br_sentry'],'#88ff66',phase);
   }
   if(OPEN.genroom){
     drawFloor(WINGS.genroom,'#0b1803','#66aa22');roomLabel(WINGS.genroom,WINGS.genroom.label,'#88ff44');
     const glow=(0.5+0.5*Math.sin(Date.now()/380))*0.05;
     ctx.fillStyle=`rgba(180,255,40,${glow})`;ctx.fillRect(WINGS.genroom.x,WINGS.genroom.y,WINGS.genroom.w,WINGS.genroom.h);
-    const gRow1=['gen_up1','gen_up2','gen_over'],gRow2=['gen_beacon','gen_fusion'];
-    gRow1.forEach((id,i)=>{if(i<gRow1.length-1&&PAD[id]&&PAD[gRow1[i+1]]){
-      drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[gRow1[i+1]].x,PAD[gRow1[i+1]].y,isBought(id)||UPG[id].lv>0?'#88ff44':'#334422',phase);}});
-    gRow2.forEach((id,i)=>{if(i<gRow2.length-1&&PAD[id]&&PAD[gRow2[i+1]]){
-      drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[gRow2[i+1]].x,PAD[gRow2[i+1]].y,UPG[id].lv>0?'#88ff44':'#334422',phase);}});
-    if(PAD['gen_up1']&&PAD['gen_beacon'])drawConveyorArrow(PAD['gen_up1'].x,PAD['gen_up1'].y,PAD['gen_beacon'].x,PAD['gen_beacon'].y,'#334422',phase);
+    drawBeltTrack(['gen_up1','gen_up2','gen_over','gen_beacon','gen_fusion'],'#88ff44',phase);
+    drawBeltTrack(['gen_door','gen_laser','gen_sentry'],'#aaffaa',phase);
   }
   if(OPEN.lab){
     drawFloor(WINGS.lab,'#041816','#228888');roomLabel(WINGS.lab,WINGS.lab.label,'#44ffdd');
     const sl=(Date.now()%2800)/2800*WINGS.lab.h;
     ctx.fillStyle='rgba(0,220,180,0.04)';ctx.fillRect(WINGS.lab.x,WINGS.lab.y+sl-3,WINGS.lab.w,6);
-    const lRow=['lab_range','lab_explo','lab_xray'];
-    lRow.forEach((id,i)=>{if(i<lRow.length-1&&PAD[id]&&PAD[lRow[i+1]]){
-      drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[lRow[i+1]].x,PAD[lRow[i+1]].y,isBought(id)||UPG[id].lv>0?'#44ffdd':'#224444',phase);}});
-    if(PAD['lab_xray']&&PAD['lab_drone'])drawConveyorArrow(PAD['lab_xray'].x,PAD['lab_xray'].y,PAD['lab_drone'].x,PAD['lab_drone'].y,'#224444',phase);
-    if(PAD['lab_drone']&&PAD['lab_nano'])drawConveyorArrow(PAD['lab_drone'].x,PAD['lab_drone'].y,PAD['lab_nano'].x,PAD['lab_nano'].y,UPG['lab_drone'].lv>0?'#44ffdd':'#224444',phase);
+    drawBeltTrack(['lab_range','lab_explo','lab_xray','lab_drone','lab_nano'],'#44ffdd',phase);
+    drawBeltTrack(['lab_door','lab_laser'],'#88ffee',phase);
   }
   if(OPEN.market){
     drawFloor(WINGS.market,'#070315','#774499');roomLabel(WINGS.market,WINGS.market.label,'#cc88ff');
     ctx.fillStyle='rgba(180,80,255,0.04)';ctx.fillRect(WINGS.market.x,WINGS.market.y,WINGS.market.w,WINGS.market.h);
-    const mRow1=['mk_double','mk_rush','mk_loot'],mRow2=['mk_black','mk_god'];
-    mRow1.forEach((id,i)=>{if(i<mRow1.length-1&&PAD[id]&&PAD[mRow1[i+1]]){
-      drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[mRow1[i+1]].x,PAD[mRow1[i+1]].y,isBought(id)?'#cc88ff':'#442255',phase);}});
-    if(PAD['mk_loot']&&PAD['mk_black'])drawConveyorArrow(PAD['mk_loot'].x,PAD['mk_loot'].y,PAD['mk_black'].x,PAD['mk_black'].y,'#442255',phase);
-    mRow2.forEach((id,i)=>{if(i<mRow2.length-1&&PAD[id]&&PAD[mRow2[i+1]]){
-      drawConveyorArrow(PAD[id].x,PAD[id].y,PAD[mRow2[i+1]].x,PAD[mRow2[i+1]].y,isBought(id)?'#cc88ff':'#442255',phase);}});
+    drawBeltTrack(['mk_double','mk_rush','mk_loot','mk_black','mk_god'],'#cc88ff',phase);
+    drawBeltTrack(['mk_door','mk_laser'],'#ddaaff',phase);
   }
 
   // Ghosts
@@ -1241,19 +1834,60 @@ function draw(){
     ctx.fillStyle=fg;ctx.beginPath();ctx.arc(CX,CY,600,0,Math.PI*2);ctx.fill();
   }
 
-  // Walls
+  // Walls — with HP damage visualization
   const wallLv=UPG.ar_wall1?UPG.ar_wall1.lv:0;
   const wc=wallLv>=3?'#dd88ff':wallLv>=2?'#aa66ff':wallLv>=1?'#8844cc':'#5c2d99';
   walls.forEach(w=>{
-    ctx.fillStyle=wc;ctx.fillRect(w.x,w.y,w.w,w.h);
-    ctx.strokeStyle='#cc99ff';ctx.lineWidth=1;ctx.strokeRect(w.x,w.y,w.w,w.h);
+    const k=getWallKey(w);
+    const seg=wallSegHP[k];
+    const hpPct=seg?seg.hp/seg.maxHp:1;
+    // Color shifts red as HP drops
+    const rc=hpPct>0.6?wc:hpPct>0.3?'#cc6622':'#cc2222';
+    ctx.fillStyle=rc;ctx.fillRect(w.x,w.y,w.w,w.h);
+    ctx.strokeStyle=hpPct>0.6?'#cc99ff':'#ff8844';ctx.lineWidth=1;ctx.strokeRect(w.x,w.y,w.w,w.h);
+    // HP bar on wall
+    if(seg&&seg.hp<seg.maxHp){
+      const bw=Math.max(w.w,w.h);
+      const bh=5;
+      const bx=w.x+(w.w>w.h?0:(w.w-bw)/2);
+      const by=w.y+(w.h>w.w?0:-8);
+      ctx.fillStyle='#330000';ctx.fillRect(bx,by,bw,bh);
+      ctx.fillStyle=hpPct>0.5?'#44ff44':'#ff4400';
+      ctx.fillRect(bx,by,bw*hpPct,bh);
+      // Crack marks on very damaged walls
+      if(hpPct<0.4){
+        ctx.strokeStyle='rgba(0,0,0,0.6)';ctx.lineWidth=1.5;
+        ctx.beginPath();
+        const cx2=w.x+w.w/2,cy2=w.y+w.h/2;
+        ctx.moveTo(cx2-10,cy2-4);ctx.lineTo(cx2+6,cy2+8);
+        ctx.moveTo(cx2+8,cy2-6);ctx.lineTo(cx2-4,cy2+5);
+        ctx.stroke();
+      }
+      // Repair prompt near player
+      if(Math.hypot(w.x+w.w/2-P.x-P.w/2,w.y+w.h/2-P.y-P.h/2)<130){
+        ctx.fillStyle='#ffee88';ctx.font='bold 14px VT323';ctx.textAlign='center';
+        ctx.fillText('🔧[E] $50',w.x+w.w/2,w.y-12);
+      }
+    }
+  });
+  // Perimeter turret slots (visual bases — show whether slot is armed or empty)
+  PERIM_SPOTS.forEach((s,i)=>{
+    const tx=CX+s.dx,ty=CY+s.dy;
+    const armed=perimTurrets.some(t=>Math.hypot(t.x-tx,t.y-ty)<30);
+    ctx.fillStyle=armed?'#1a0e28':'#111118';
+    ctx.beginPath();ctx.arc(tx,ty,20,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle=armed?'#8844bb':'#332244';ctx.lineWidth=2;ctx.stroke();
+    if(!armed){
+      ctx.fillStyle='#332244';ctx.font='14px VT323';ctx.textAlign='center';
+      ctx.fillText('⬡',tx,ty+5);
+    }
   });
   doors.forEach(d=>{
     ctx.fillStyle=d.open?'rgba(68,160,255,.12)':'#101840';
     ctx.fillRect(d.x,d.y,d.w,d.h);
-    ctx.strokeStyle='#44aaff';ctx.lineWidth=2;ctx.strokeRect(d.x,d.y,d.w,d.h);
-    ctx.fillStyle='#88ccff';ctx.font='12px VT323';ctx.textAlign='center';
-    ctx.fillText(d.open?'OPEN':'[E]DOOR',d.x+d.w/2,d.y-5);
+    ctx.strokeStyle=d.open?'#44aaff':'#ff4422';ctx.lineWidth=2;ctx.strokeRect(d.x,d.y,d.w,d.h);
+    ctx.fillStyle='#88ccff';ctx.font='13px VT323';ctx.textAlign='center';
+    if(!d.auto)ctx.fillText(d.open?'GATE OPEN':'[E] GATE',d.x+d.w/2,d.y-5);
   });
 
   // Mines
@@ -1266,7 +1900,7 @@ function draw(){
     ctx.globalAlpha=1;
   });
 
-  // Turrets
+  // Armory turrets
   turrets.forEach(tu=>{
     ctx.strokeStyle='rgba(255,70,50,.08)';ctx.lineWidth=1;
     ctx.beginPath();ctx.arc(tu.x,tu.y,tu.range,0,Math.PI*2);ctx.stroke();
@@ -1275,6 +1909,43 @@ function draw(){
     ctx.fillStyle='#771e22';ctx.beginPath();ctx.arc(tu.x,tu.y,11,0,Math.PI*2);ctx.fill();
     ctx.strokeStyle='#ff7755';ctx.lineWidth=7;
     ctx.beginPath();ctx.moveTo(tu.x,tu.y);ctx.lineTo(tu.x+Math.cos(tu.angle)*34,tu.y+Math.sin(tu.angle)*34);ctx.stroke();
+  });
+  // Room sentries
+  roomSentries.forEach(tu=>{
+    tu.t-=dt;
+    let tgt=null,tgtD=tu.range;
+    for(const e of enemies){const d=Math.hypot(e.x+e.w/2-tu.x,e.y+e.h/2-tu.y);if(d<tgtD){tgt=e;tgtD=d;}}
+    if(!tgt){tu.angle+=dt*0.9;return;}
+    tu.angle=Math.atan2(tgt.y+tgt.h/2-tu.y,tgt.x+tgt.w/2-tu.x);
+    if(tu.t<=0){
+      tu.t=1/tu.bRate;
+      bullets.push({x:tu.x,y:tu.y,vx:Math.cos(tu.angle)*500,vy:Math.sin(tu.angle)*500,dmg:tu.dmg,life:0.8,col:'#88ff44'});
+    }
+  });
+  // Laser door damage
+  for(const id in laserDoors){
+    const ld=laserDoors[id];
+    if(!ld.active||!ld.zone)continue;
+    for(let i=enemies.length-1;i>=0;i--){
+      const e=enemies[i];
+      if(aabb({x:e.x,y:e.y,w:e.w,h:e.h},ld.zone)){
+        const ldmg=(id.includes('gen')?120:id.includes('br')?0:60)*dt;
+        e.hp-=ldmg;
+        if(id.includes('br')&&!e._stunned){e._stunned=2;e.st=2;}// stun
+        if(e.hp<=0)killEnemy(i,e);
+        else spawnPfx(e.x+e.w/2-camX,e.y+e.h/2-camY,'#ff2222',2);
+      }
+    }
+  }
+  // Perimeter guard turrets
+  perimTurrets.forEach(tu=>{
+    ctx.strokeStyle='rgba(80,160,255,.07)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(tu.x,tu.y,tu.range,0,Math.PI*2);ctx.stroke();
+    ctx.fillStyle='#0d1830';ctx.beginPath();ctx.arc(tu.x,tu.y,20,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle=tu.lv>=4?'#0088ff':'#4466bb';ctx.lineWidth=2.5;ctx.stroke();
+    ctx.fillStyle='#1a2a55';ctx.beginPath();ctx.arc(tu.x,tu.y,9,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#44aaff';ctx.lineWidth=5;
+    ctx.beginPath();ctx.moveTo(tu.x,tu.y);ctx.lineTo(tu.x+Math.cos(tu.angle)*26,tu.y+Math.sin(tu.angle)*26);ctx.stroke();
   });
 
   // Bullets
@@ -1393,37 +2064,132 @@ function draw(){
   // ── WORLD COIN DROPS ──
   drawCoinDrops();
 
+  // ── LASER DOOR VISUALS ──
+  for(const id in laserDoors){
+    const ld=laserDoors[id];if(!ld.zone)continue;
+    const z=ld.zone;
+    if(ld.active){
+      // Animated red laser bars
+      const t=Date.now()/200;
+      ctx.save();
+      ctx.strokeStyle=`rgba(255,40,40,${0.6+0.4*Math.sin(t)})`;
+      ctx.lineWidth=3;ctx.shadowColor='#ff0000';ctx.shadowBlur=12;
+      if(z.w>z.h){
+        for(let y=z.y+4;y<z.y+z.h;y+=8){
+          ctx.beginPath();ctx.moveTo(z.x,y);ctx.lineTo(z.x+z.w,y);ctx.stroke();
+        }
+      } else {
+        for(let x=z.x+4;x<z.x+z.w;x+=8){
+          ctx.beginPath();ctx.moveTo(x,z.y);ctx.lineTo(x,z.y+z.h);ctx.stroke();
+        }
+      }
+      ctx.shadowBlur=0;
+      ctx.fillStyle='rgba(255,40,40,0.15)';ctx.fillRect(z.x,z.y,z.w,z.h);
+      ctx.restore();
+      // Toggle label near laser
+      ctx.fillStyle='#ff6644';ctx.font='12px VT323';ctx.textAlign='center';
+      ctx.fillText('🔴[E]',z.x+z.w/2,z.y-6);
+    } else {
+      ctx.fillStyle='rgba(255,40,40,0.06)';ctx.fillRect(z.x,z.y,z.w,z.h);
+      ctx.fillStyle='#553333';ctx.font='11px VT323';ctx.textAlign='center';
+      ctx.fillText('⬜[E]',z.x+z.w/2,z.y-6);
+    }
+  }
+
+  // ── ROOM SENTRIES ──
+  roomSentries.forEach(tu=>{
+    ctx.strokeStyle='rgba(100,255,60,.06)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(tu.x,tu.y,tu.range,0,Math.PI*2);ctx.stroke();
+    ctx.fillStyle='#142008';ctx.beginPath();ctx.arc(tu.x,tu.y,18,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#44bb22';ctx.lineWidth=2;ctx.stroke();
+    ctx.strokeStyle='#88ff44';ctx.lineWidth=5;
+    ctx.beginPath();ctx.moveTo(tu.x,tu.y);ctx.lineTo(tu.x+Math.cos(tu.angle)*22,tu.y+Math.sin(tu.angle)*22);ctx.stroke();
+  });
+
   // ── ENEMIES ──
   enemies.forEach(e=>{
     const wb=Math.sin(e.wob)*3;
-    ctx.fillStyle=e.col;ctx.beginPath();ctx.ellipse(e.x+e.w/2,e.y+e.h/2+wb,e.w/2+2,e.h/2+2,0,0,Math.PI*2);ctx.fill();
-    if(e.big){ctx.strokeStyle='rgba(255,255,255,.3)';ctx.lineWidth=2.5;ctx.stroke();}
-    ctx.fillStyle='#fff';
-    ctx.beginPath();ctx.arc(e.x+e.w*.3,e.y+e.h*.33+wb,e.big?5.5:3.5,0,Math.PI*2);ctx.fill();
-    ctx.beginPath();ctx.arc(e.x+e.w*.7,e.y+e.h*.33+wb,e.big?5.5:3.5,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle='#222';
-    ctx.beginPath();ctx.arc(e.x+e.w*.3,e.y+e.h*.33+wb,e.big?2.5:1.8,0,Math.PI*2);ctx.fill();
-    ctx.beginPath();ctx.arc(e.x+e.w*.7,e.y+e.h*.33+wb,e.big?2.5:1.8,0,Math.PI*2);ctx.fill();
-    if(e.hp<e.maxHp){
-      ctx.fillStyle='#1a1a1a';ctx.fillRect(e.x,e.y-11,e.w,5);
-      ctx.fillStyle=e.big?'#ff8800':'#ee3333';ctx.fillRect(e.x,e.y-11,e.w*(e.hp/e.maxHp),5);
+    if(e.isBoss){
+      // Boss: large distinctive rendering
+      const bx=e.x+e.w/2, by=e.y+e.h/2;
+      // Aura glow
+      ctx.globalAlpha=0.18+0.1*Math.sin(Date.now()/300);
+      ctx.fillStyle=e.col;ctx.beginPath();ctx.arc(bx,by,e.w/2+22,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+      // Body
+      const bimg=IMG[e.id];
+      if(bimg&&bimg.complete&&bimg.naturalWidth>0){
+        ctx.save();ctx.beginPath();ctx.arc(e.x+e.w/2,e.y+e.h/2,e.w/2+4,0,Math.PI*2);ctx.clip();
+        ctx.drawImage(bimg,e.x,e.y,e.w,e.h);ctx.restore();
+      } else {
+        ctx.fillStyle=e.col;ctx.beginPath();ctx.ellipse(bx,by+wb,e.w/2+4,e.h/2+4,0,0,Math.PI*2);ctx.fill();
+        // Boss icon
+        ctx.font=`${Math.floor(e.w*0.55)}px serif`;ctx.textAlign='center';
+        ctx.fillText(e.icon,bx,by+wb+e.h*0.2);
+      }
+      // Crown/marker for supreme
+      if(e.ability==='supremacy'){
+        ctx.font='28px serif';ctx.textAlign='center';ctx.fillText('👑',bx,by-e.h/2-12);
+      }
+      // Belly flop telegraph
+      if(e.floppingT&&e.floppingT>0&&e.flopTarget){
+        ctx.globalAlpha=0.5;ctx.strokeStyle='#ff8800';ctx.lineWidth=3;ctx.setLineDash([8,5]);
+        ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(e.flopTarget.x,e.flopTarget.y);ctx.stroke();
+        ctx.setLineDash([]);ctx.globalAlpha=0.3;
+        ctx.fillStyle='#ff4400';ctx.beginPath();ctx.arc(e.flopTarget.x,e.flopTarget.y,100,0,Math.PI*2);ctx.fill();
+        ctx.globalAlpha=1;
+      }
+      // Name tag
+      ctx.fillStyle='rgba(0,0,0,.75)';ctx.fillRect(bx-50,by-e.h/2-36,100,20);
+      ctx.fillStyle='#fff';ctx.font='bold 13px VT323';ctx.textAlign='center';
+      ctx.fillText(e.name,bx,by-e.h/2-20);
+      ctx.fillStyle=e.col;ctx.font='10px VT323';ctx.fillText(e.title,bx,by-e.h/2-7);
+      // HP bar
+      ctx.fillStyle='#1a0a0a';ctx.fillRect(bx-30,by+e.h/2+5,60,7);
+      ctx.fillStyle=e.col;ctx.fillRect(bx-30,by+e.h/2+5,60*(e.hp/e.maxHp),7);
+      ctx.strokeStyle='rgba(255,255,255,.3)';ctx.lineWidth=1;ctx.strokeRect(bx-30,by+e.h/2+5,60,7);
+    } else {
+      // Normal enemy
+      ctx.fillStyle=e.col;ctx.beginPath();ctx.ellipse(e.x+e.w/2,e.y+e.h/2+wb,e.w/2+2,e.h/2+2,0,0,Math.PI*2);ctx.fill();
+      if(e.big){ctx.strokeStyle='rgba(255,255,255,.3)';ctx.lineWidth=2.5;ctx.stroke();}
+      // Eyes
+      ctx.fillStyle='#fff';
+      ctx.beginPath();ctx.arc(e.x+e.w*.3,e.y+e.h*.33+wb,e.big?5.5:3.5,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(e.x+e.w*.7,e.y+e.h*.33+wb,e.big?5.5:3.5,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#222';
+      ctx.beginPath();ctx.arc(e.x+e.w*.3,e.y+e.h*.33+wb,e.big?2.5:1.8,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(e.x+e.w*.7,e.y+e.h*.33+wb,e.big?2.5:1.8,0,Math.PI*2);ctx.fill();
+      if(e.hp<e.maxHp){
+        ctx.fillStyle='#1a1a1a';ctx.fillRect(e.x,e.y-11,e.w,5);
+        ctx.fillStyle=e.big?'#ff8800':'#ee3333';ctx.fillRect(e.x,e.y-11,e.w*(e.hp/e.maxHp),5);
+      }
     }
   });
+
 
   // ── PLAYER ──
   const px=P.x,py=P.y,pw=P.w,ph=P.h;
   ctx.fillStyle='rgba(0,0,0,.18)';ctx.beginPath();ctx.ellipse(px+pw/2,py+ph+4,pw/2,6,0,0,Math.PI*2);ctx.fill();
-  const bodyC=UPG.suit&&UPG.suit.lv>0?'#88ccff':'#ffe566';
   if(invincT>0)ctx.globalAlpha=0.6+0.4*Math.sin(Date.now()/55);
-  ctx.fillStyle=bodyC;ctx.fillRect(px,py,pw,ph);ctx.globalAlpha=1;
-  ctx.fillStyle='#886644';ctx.fillRect(px+2,py+ph*.5,pw-4,ph*.3);
-  ctx.fillStyle='#ffcc99';ctx.fillRect(px+4,py+2,pw-8,ph*.55);
-  ctx.fillStyle='#333';ctx.fillRect(px+7,py+9,4,3.5);ctx.fillRect(px+pw-11,py+9,4,3.5);
+  const philImg=IMG['philcollins'];
+  if(philImg&&philImg.complete&&philImg.naturalWidth>0){
+    ctx.save();ctx.beginPath();ctx.rect(px,py,pw,ph);ctx.clip();
+    ctx.drawImage(philImg,px,py,pw,ph);ctx.restore();
+  } else {
+    const bodyC=UPG.suit&&UPG.suit.lv>0?'#88ccff':'#ffe566';
+    ctx.fillStyle=bodyC;ctx.fillRect(px,py,pw,ph);
+    ctx.fillStyle='#886644';ctx.fillRect(px+2,py+ph*.5,pw-4,ph*.3);
+    ctx.fillStyle='#ffcc99';ctx.fillRect(px+4,py+2,pw-8,ph*.55);
+    ctx.fillStyle='#333';ctx.fillRect(px+7,py+9,4,3.5);ctx.fillRect(px+pw-11,py+9,4,3.5);
+  }
   ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(px-14,py-22,62,15);
   ctx.fillStyle='#ffe566';ctx.font='13px VT323';ctx.textAlign='center';ctx.fillText('Phil Collins',px+pw/2,py-9);
   ctx.fillStyle='#1a1a1a';ctx.fillRect(px-2,py-32,pw+4,7);
   ctx.fillStyle=P.hp>50?'#44ff88':P.hp>25?'#ffaa22':'#f44';
   ctx.fillRect(px-2,py-32,(pw+4)*(P.hp/P.maxHp),7);
+
+  // Allies
+  drawAllies();
 
   // Swing arc
   if(WPN.sw){
@@ -1451,6 +2217,58 @@ function draw(){
   });
   ctx.globalAlpha=1;
   ctx.restore();
+
+  // ── TUTORIAL ARROW: point to next target pad ──────
+  if(TUT.step>=2&&TUT.step<=6){
+    const targetIds={2:'i_scrap',3:'i_moss',4:'r_tower',5:null,6:'door'};
+    const tid=targetIds[TUT.step];
+    // Step 5: point to nearest enemy instead
+    if(TUT.step===5&&enemies.length>0){
+      const near=enemies.reduce((best,e)=>{
+        const d=Math.hypot(e.x-P.x,e.y-P.y);
+        return(!best||d<best.d)?{d,e}:best;
+      },null);
+      if(near){
+        const sx=near.e.x+near.e.w/2-camX,sy=near.e.y+near.e.h/2-camY;
+        const pcx=P.x+P.w/2-camX,pcy=P.y+P.h/2-camY;
+        const ang=Math.atan2(sy-pcy,sx-pcx);
+        const t=Date.now()/300;
+        const ar=40+8*Math.sin(t);
+        ctx.save();ctx.translate(pcx+Math.cos(ang)*ar,pcy+Math.sin(ang)*ar);ctx.rotate(ang);
+        ctx.fillStyle='rgba(255,80,80,0.9)';ctx.font='bold 22px serif';ctx.textAlign='center';
+        ctx.fillText('→',0,6);ctx.restore();
+      }
+    } else if(tid&&PAD[tid]){
+      const px2=PAD[tid].x-camX,py2=PAD[tid].y-camY;
+      // Only show arrow if pad off-screen or far
+      const dist=Math.hypot(px2-cvs.width/2,py2-cvs.height/2);
+      if(dist>200){
+        // Edge arrow pointing toward pad
+        const ang=Math.atan2(py2-cvs.height/2,px2-cvs.width/2);
+        const margin=50;
+        const ex=cvs.width/2+Math.cos(ang)*Math.min(dist,cvs.width/2-margin);
+        const ey=cvs.height/2+Math.sin(ang)*Math.min(dist,cvs.height/2-margin);
+        const t=Date.now()/400;
+        ctx.save();
+        ctx.globalAlpha=0.7+0.3*Math.sin(t);
+        ctx.translate(ex,ey);ctx.rotate(ang);
+        ctx.fillStyle='#ffe566';
+        ctx.beginPath();ctx.moveTo(20,0);ctx.lineTo(-12,12);ctx.lineTo(-6,0);ctx.lineTo(-12,-12);ctx.closePath();ctx.fill();
+        ctx.strokeStyle='rgba(0,0,0,0.5)';ctx.lineWidth=2;ctx.stroke();
+        ctx.restore();ctx.globalAlpha=1;
+      } else {
+        // On-screen: bouncing arrow above pad
+        const t=Date.now()/300;
+        const bounce=Math.sin(t)*8;
+        ctx.save();ctx.globalAlpha=0.9;
+        ctx.fillStyle='#ffe566';ctx.font='bold 28px serif';ctx.textAlign='center';
+        ctx.fillText('↓',px2,py2-48+bounce);
+        ctx.font='bold 13px VT323';ctx.fillStyle='#fff';
+        ctx.fillText('[E] BUY',px2,py2-66+bounce);
+        ctx.restore();ctx.globalAlpha=1;
+      }
+    }
+  }
 
   drawMinimap();
   document.getElementById('sMoney').textContent=Math.floor(money);
@@ -1516,17 +2334,24 @@ function updPanel(){
   }
   function row(id){const u=UPG[id],c=cls(id);return`<div class="pRow ${c}"><div class="ico">${u.icon}</div><div class="inf"><b>${u.label}</b><small>${sub(id)}</small></div><div class="bdg">${badge(id)}</div>${tipHTML(id)}</div>`;}
   function sec(h,ids){return`<div class="pSec"><h3>${h}</h3>${ids.map(row).join('')}</div>`;}
+  // Base integrity display
+  const allWalls=walls.length;
+  const damagedWalls=Object.values(wallSegHP).filter(s=>s.hp<s.maxHp).length;
+  const integrityHtml=damagedWalls>0
+    ?`<div style="background:rgba(180,40,0,.25);border:1px solid #ff4422;border-radius:4px;padding:5px 8px;margin-bottom:8px;font-size:14px;color:#ff8844;">🧱 ${damagedWalls} wall section${damagedWalls>1?'s':''} damaged! Walk near wall → press E to repair ($50)</div>`
+    :`<div style="background:rgba(0,80,0,.15);border:1px solid #226622;border-radius:4px;padding:4px 8px;margin-bottom:8px;font-size:13px;color:#44aa44;">🧱 Base integrity: OK</div>`;
   el.innerHTML=
+    integrityHtml+
     sec('💰 INCOME BELT',['i_scrap','i_moss','i_crystal','i_nest','i_star','i_plasma','i_dark','i_royalties'])+
     sec('🏠 ROOM UNLOCKS',['r_tower','r_armory','r_barracks','r_genroom','r_lab','r_market'])+
-    sec('🛡️ BASE',['door','flood','beacon','medkit','shield','jammer'])+
-    sec('👤 PHIL',['music','boots','suit','weapon','aura','vampire','rally','stim'])+
-    sec('⚡ TOWER',['tw_scope1','tw_scope2','tw_early','tw_flare','tw_snipe'])+
-    sec('🔫 ARMORY',['ar_wall1','ar_turret1','ar_turret2','ar_mines','ar_flak','ar_shield'])+
-    sec('🪖 BARRACKS',['br_medic','br_combat','br_rally','br_stim','br_tank','br_berserk'])+
-    sec('⚡ GENERATOR',['gen_up1','gen_up2','gen_over','gen_beacon','gen_fusion'])+
-    sec('🔬 LAB',['lab_range','lab_explo','lab_xray','lab_drone','lab_nano'])+
-    sec('🏪 MARKET',['mk_double','mk_rush','mk_loot','mk_black','mk_god']);
+    sec('🚪 BASE SYSTEMS',['door','flood','beacon','medkit','shield','jammer'])+
+    sec('🎵 PHIL UPGRADES',['music','boots','suit','weapon','aura','vampire','rally','stim'])+
+    (OPEN.tower?sec('🗼 WATCH TOWER',['tw_scope1','tw_scope2','tw_early','tw_flare','tw_snipe'])+sec('🗼 TOWER DEFENSES',['tw_door','tw_laser','tw_sentry']):'')+
+    (OPEN.armory?sec('🔫 ARMORY',['ar_wall1','ar_turret1','ar_turret2','ar_mines','ar_flak','ar_shield'])+sec('🔫 ARMORY DEFENSES',['ar_door','ar_laser','ar_sentry']):'')+
+    (OPEN.barracks?sec('🪖 BARRACKS',['br_medic','br_combat','br_rally','br_stim','br_tank','br_berserk'])+sec('🪖 BARRACKS DEFENSES',['br_door','br_laser','br_sentry']):'')+
+    (OPEN.genroom?sec('⚡ GENERATOR',['gen_up1','gen_up2','gen_over','gen_beacon','gen_fusion'])+sec('⚡ GEN DEFENSES',['gen_door','gen_laser','gen_sentry']):'')+
+    (OPEN.lab?sec('🔬 LAB',['lab_range','lab_explo','lab_xray','lab_drone','lab_nano'])+sec('🔬 LAB DEFENSES',['lab_door','lab_laser']):'')+
+    (OPEN.market?sec('🏪 MARKET',['mk_double','mk_rush','mk_loot','mk_black','mk_god'])+sec('🏪 MARKET DEFENSES',['mk_door','mk_laser']):'');
   requestAnimationFrame(()=>{
     document.querySelectorAll('.pRow').forEach(row=>{
       const tip=row.querySelector('.tip');if(!tip)return;
@@ -1559,7 +2384,11 @@ function loop(ts){
 function startGame(){
   document.getElementById('titleScreen').style.display='none';
   running=true;lastT=performance.now();
-  genTerrain();makePads();buildWalls();
+  genTerrain();makePads();buildWalls();initWallHP();
+  laserDoors={};roomSentries=[];
+  gameTime=0;bossesSpawned=0;activeBosses=[];
+  rebellionActive=0;supremacyActive=0;
+  codeProjectiles=[];initAllies();
   P.x=CX-P.w/2;P.y=HUB.y+HUB.h+WT+55;
   updPanel();updPassivesHUD();
   TUT.step=1;

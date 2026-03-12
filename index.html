@@ -152,7 +152,8 @@ body{background:#0a0a1a;overflow:hidden;font-family:'VT323',monospace;color:#e0d
   <div style="font-size:clamp(9px,1.5vw,14px);color:#ff8888;">The Boohbahs have claimed another victim.</div>
   <div id="deathTime" style="font-size:clamp(9px,1.4vw,13px);color:#ffaa44;"></div>
   <div id="deathKills" style="font-size:clamp(9px,1.4vw,13px);color:#44ffaa;"></div>
-  <button onclick="restartGame()" style="margin-top:18px;padding:14px 32px;font-family:'Press Start 2P',monospace;font-size:clamp(9px,1.4vw,13px);background:#aa44ff;color:#fff;border:none;border-radius:8px;cursor:pointer;box-shadow:0 0 18px #aa44ff88;">▶ TRY AGAIN</button>
+  <div id="deathHint" style="font-size:clamp(8px,1.2vw,11px);color:#aaa;margin-top:6px;"></div>
+  <button id="deathRestart" onclick="restartGame()" style="margin-top:18px;padding:14px 32px;font-family:'Press Start 2P',monospace;font-size:clamp(9px,1.4vw,13px);background:#aa44ff;color:#fff;border:none;border-radius:8px;cursor:pointer;box-shadow:0 0 18px #aa44ff88;">▶ RESTART</button>
 </div>
 <div id="titleScreen">
   <div class="spin">🛸</div>
@@ -411,6 +412,13 @@ const mouse={x:0,y:0};
 document.addEventListener('mousemove',e=>{mouse.x=e.clientX;mouse.y=e.clientY;});
 document.addEventListener('mousedown',e=>{if(e.button===0&&running)doSwing();});
 
+// allow restart from death screen via keyboard
+document.addEventListener('keydown',e=>{
+  if(gameOver){
+    restartGame();
+  }
+});
+
 // ── WEAPON ─────────────────────────────────────────────
 const WPN={dmg:22,range:85,cd:0.45,t:0,swT:0,swDur:0.18,swA:0,sw:false,lv:0,
   names:['👊 Fists','🥁 Drumstick','🎤 Mic Stand','🥁 Golden Kit']};
@@ -488,6 +496,8 @@ const UPG={
   br_stim:    {icon:'⚡',label:'Adrenal Boost',    type:'mul',cost:320,costM:2.3,max:3,lv:0,req:'br_rally',     desc:'Each level: attack cooldown reduced 10%.'},
   br_tank:    {icon:'🛡️',label:'Iron Skin',       type:'mul',cost:420,costM:2.3,max:3,lv:0,req:'br_stim',      desc:'Each level: +14 armor damage reduction.'},
   br_berserk: {icon:'😤',label:'Berserker Mode',   type:'one',cost:1800,req:'br_tank',     desc:'Below 30% HP: speed +80%, damage ×2. Get low to get deadly.'},
+  ally_keller:{icon:'👩',label:'Keller Training',type:'mul',cost:300,costM:2,max:3,lv:0,req:'br_combat',desc:'Each level: +6 ally damage & +50 HP to Mrs. Keller.'},
+  ally_mccuen:{icon:'👨',label:'McCuen Training',type:'mul',cost:300,costM:2,max:3,lv:0,req:'br_tank',desc:'Each level: +6 ally damage & +50 HP to Mr. McCuen.'},
 
   // GENERATOR — conveyor belt of 3+2
   gen_up1:    {icon:'⚡',label:'Generator Mk.1',   type:'mul',cost:320,costM:1.8,max:3,lv:0,req:null,          desc:'Each level: +15/s income. The core of your economy.'},
@@ -518,7 +528,7 @@ const UPG={
   // Armory defenses
   ar_door:    {icon:'🚪',label:'Armory Gate',      type:'one',cost:180,req:null, desc:'Heavy blast door at armory entrance. Toggle with E.'},
   ar_laser:   {icon:'🔴',label:'Laser Grid',       type:'one',cost:600,req:'ar_door', desc:'Laser grid across armory corridor. Incinerate intruders.'},
-  ar_sentry:  {icon:'🤖',label:'Armory Sentry',    type:'mul',cost:460,costM:2.2,max:3,lv:0,req:'ar_laser', desc:'Armory defense turret. High damage, short range.'},
+  ar_sentry:  {icon:'🤖',label:'Armory Sentry',    type:'mul',cost:460,costM:2.2,max:3,lv:0,req:['ar_laser','r_armory'], desc:'Armory defense turret. High damage, short range.'},
   // Barracks defenses
   br_door:    {icon:'🚪',label:'Barracks Gate',    type:'one',cost:180,req:null, desc:'Reinforced barracks door. Toggle with E.'},
   br_laser:   {icon:'🔴',label:'Stun Laser',       type:'one',cost:520,req:'br_door', desc:'Stun laser freezes Boohbahs in corridor for 2s then burns.'},
@@ -539,7 +549,7 @@ const PAD={};
 const ROOM_PADS={
   tower:   ['tw_scope1','tw_scope2','tw_early','tw_flare','tw_snipe','tw_door','tw_laser','tw_sentry'],
   armory:  ['ar_wall1','ar_turret1','ar_turret2','ar_mines','ar_flak','ar_shield','ar_autorepair','ar_door','ar_laser','ar_sentry'],
-  barracks:['br_medic','br_combat','br_rally','br_stim','br_tank','br_berserk','br_door','br_laser','br_sentry'],
+  barracks:['br_medic','br_combat','br_rally','ally_keller','ally_mccuen','br_stim','br_tank','br_berserk','br_door','br_laser','br_sentry'],
   genroom: ['gen_up1','gen_up2','gen_over','gen_beacon','gen_fusion','gen_door','gen_laser','gen_sentry'],
   lab:     ['lab_range','lab_explo','lab_xray','lab_drone','lab_nano','lab_door','lab_laser'],
   market:  ['mk_double','mk_rush','mk_loot','mk_black','mk_god','mk_door','mk_laser'],
@@ -548,6 +558,8 @@ const ROOM_PADS={
 let fusionBought=false,invincT=0,invincCD=30,aegisHP=0;
 let totalKills=0;
 let combatDrones=[];
+let playerRepairCD=0; // seconds until player can auto-repair again
+
 // Room defense state
 let laserDoors={}; // id -> {active: bool} — player toggles these
 let roomSentries=[]; // placed turrets in rooms
@@ -769,9 +781,9 @@ function makePads(){
   // ── BARRACKS (700×700): 2 rows of 3 ──
   const B=WINGS.barracks;
   const bSp=190, bX0=B.x+80;
-  ['br_medic','br_combat','br_rally'].forEach((id,i)=>pl(id, bX0+i*bSp, B.y+200));
+  ['br_medic','br_combat','br_rally','ally_keller','ally_mccuen'].forEach((id,i)=>pl(id, bX0+i*bSp, B.y+200));
   ['br_stim','br_tank','br_berserk'].forEach((id,i)=>pl(id, bX0+i*bSp, B.y+420));
-  PAD_ROWS.barracks=[['br_medic','br_combat','br_rally'],['br_stim','br_tank','br_berserk']];
+  PAD_ROWS.barracks=[['br_medic','br_combat','br_rally','ally_keller','ally_mccuen'],['br_stim','br_tank','br_berserk']];
 
   // ── GENERATOR (700×560): single row of 5 ──
   const GG=WINGS.genroom;
@@ -834,7 +846,16 @@ function makePads(){
 function getCost(id){const u=UPG[id];return u.type==='mul'?Math.round(u.cost*Math.pow(u.costM,u.lv)):u.cost;}
 function isBought(id){const u=UPG[id];if(!u)return false;return u.type==='mul'?u.lv>0:!!u.bought;}
 function canBuy(id){const u=UPG[id];if(!u)return false;return u.type==='mul'?u.lv<u.max:!u.bought;}
-function reqMet(id){const u=UPG[id];if(!u)return false;if(!u.req)return true;return isBought(u.req);}
+function reqMet(id){
+  const u=UPG[id];
+  if(!u) return false;
+  if(!u.req) return true;
+  // support multiple requirements in an array
+  if(Array.isArray(u.req)){
+    return u.req.every(r=>isBought(r));
+  }
+  return isBought(u.req);
+}
 function isVisible(id){
   for(const[rk,list]of Object.entries(ROOM_PADS)){if(list.includes(id))return OPEN[rk];}
   if(id==='r_lab'||id==='r_market')return OPEN.genroom;
@@ -982,9 +1003,11 @@ function rebuildRoomSentries(){
   for(const def of roomDefs){
     if(!OPEN[def.wing])continue;
     const u=UPG[def.id];
-    if(!u||typeof u.lv!=='number'||u.lv<=0)continue;
-    const wing=WINGS[def.wing];
-    const lv=u.lv;
+    if(!u)continue;
+    // ensure level is a number, allow string-to-number gracefully
+    const lv=Number(u.lv)||0;
+    if(lv<=0)continue;
+    const wing=WINGS[def.wing]||{x:0,y:0,w:0,h:0,accent:'#fff'};
     const range=180+lv*70;
     const dmg=18+lv*14;
     const bRate=0.8+lv*0.4;
@@ -1023,7 +1046,16 @@ function advanceTutorial(step){
 // ── BUY ────────────────────────────────────────────────
 function tryBuy(id){
   const u=UPG[id];if(!u||!canBuy(id))return;
-  if(!reqMet(id)){showMsg('🔒 Need: '+UPG[u.req].label+' first!');return;}
+  if(!reqMet(id)){
+    let reqText='?';
+    if(Array.isArray(u.req)){
+      reqText=u.req.map(r=>UPG[r]?UPG[r].label:r).join(' & ');
+    } else {
+      reqText=UPG[u.req]?UPG[u.req].label:u.req;
+    }
+    showMsg('🔒 Need: '+reqText+' first!');
+    return;
+  }
   if(!isBuyableNow(id)){
     if(TUT.step<=5)showMsg('📖 Complete tutorial step '+TUT.step+' first!');
     return;
@@ -1046,6 +1078,10 @@ function tryBuy(id){
     else if(TUT.step===3&&TUT.incPadsBought>=3)advanceTutorial(4);
   } else if(u.type==='room'){
     u.bought=true;OPEN[u.rk]=true;buildWalls();
+    // when a room opens we may already have purchased sentries for it,
+    // rebuild so they appear immediately instead of waiting for another
+    // upgrade purchase.
+    try{rebuildRoomSentries();}catch(e){console.error('Sentry rebuild error',e);}
     showMsg('🏠 '+WINGS[u.rk].label+' unlocked!');
     if(!TUT.roomUnlocked){TUT.roomUnlocked=true;if(TUT.step===4)advanceTutorial(5);}
   } else if(u.type==='one'){
@@ -1123,6 +1159,8 @@ function applyMul(id){
     br_combat: ()=>{WPN.dmg+=10;},
     br_stim:   ()=>{WPN.cd=Math.max(0.11,WPN.cd*0.9);},
     br_tank:   ()=>{P.armor+=14;},
+    ally_keller:()=>{const a=ALLIES[0];a.dmg+=6;a.maxHp+=50;a.hp+=50;},
+    ally_mccuen:()=>{const a=ALLIES[1];a.dmg+=6;a.maxHp+=50;a.hp+=50;},
     gen_up1:   ()=>{income+=15;},
     gen_up2:   ()=>{income+=28;},
     gen_over:  ()=>{income=Math.round(income*1.15);showMsg('🔧 Overclock — income +15%!');},
@@ -1266,7 +1304,10 @@ function spawnBoss(bossIdx){
   else{bx=50;by=Math.random()*WH;}
   const boss={...b, x:bx-b.size/2, y:by-b.size/2, w:b.size,h:b.size,
     hp:b.hp*Math.max(1,eDiff*.5),maxHp:b.hp*Math.max(1,eDiff*.5),
-    isBoss:true, wob:0, st:0, jamT:0, big:true, abilityT:b.abilityCd*Math.random()};
+    isBoss:true, wob:0, st:0, jamT:0, big:true,
+    abilityT:b.abilityCd*Math.random(),
+    passiveT:120 // 2 minutes docile timer
+  };
   activeBosses.push(boss);
   enemies.push(boss);
   showMsg('⚠️ '+b.name+' appears! '+b.title+'!');
@@ -1291,9 +1332,10 @@ function spawnEnemy(){
   const big=eDiff>2.5&&Math.random()<0.22;
   // More aggressive over time: higher base speed, faster spawn
   const aggrMult=1+Math.min(eDiff*0.12,1.8);
+  const timeMult=1+gameTime/120; // speed/hp grow with elapsed minutes
   enemies.push({x:ex,y:ey,w:big?44:24,h:big?44:24,
-    speed:((big?38:58)+Math.random()*32*eDiff)*aggrMult,
-    hp:(big?160:36)*eDiff,maxHp:(big?160:36)*eDiff,
+    speed:((big?38:58)+Math.random()*32*eDiff)*aggrMult*timeMult,
+    hp:(big?160:36)*eDiff*timeMult,maxHp:(big?160:36)*eDiff*timeMult,
     col:ECOLS[Math.random()*ECOLS.length|0],wob:Math.random()*6.28,st:0,jamT:0,big,
     moraleBuff:rebellionActive>0?1.35:supremacyActive>0?1.8:1});
 }
@@ -1308,6 +1350,10 @@ function updEnemies(dt){
   // Boss spawns
   if(bossesSpawned<BOSS_SPAWN_INTERVALS.length&&gameTime>=BOSS_SPAWN_INTERVALS[bossesSpawned]){
     spawnBoss(bossesSpawned%BOSSES.length);bossesSpawned++;
+  }
+  // ensure all bosses exist early on (once at start)
+  if(gameTime<dt && bossesSpawned===0){
+    for(let i=0;i<BOSSES.length;i++)spawnBoss(i);
   }
   respawnMines(dt);
   const jamActive=UPG.jammer.bought,floodActive=UPG.flood.bought;
@@ -1339,36 +1385,57 @@ function updEnemies(dt){
     const spd=e.speed*(e._slow?0.45:1);
     const angleToPlayer=Math.atan2(P.y-e.y,P.x-e.x);
     const angleToBase=Math.atan2(CY-e.y,CX-e.x);
-    const baseAngle=e._rushMode?angleToBase:angleToPlayer;
-    const angle=jamActive&&e._jamA!=null?e._jamA:baseAngle;
-    const nx=e.x+Math.cos(angle)*spd*dt,ny=e.y+Math.sin(angle)*spd*dt;
+    // always chase player, ignoring random base-rush for small enemies;
+    // big boohbahs still treat wilfully but will damage base if they get close
+    let angle=angleToPlayer;
+    if(jamActive&&e._jamA!=null)angle=e._jamA;
+    // choose target for big or boss: nearer of player/base
+    let attackAngle=angleToPlayer;
+    if(e.big||e.isBoss){
+      const dP=Math.hypot(P.x-e.x,P.y-e.y);
+      const dB=Math.hypot(CX-e.x,CY-e.y);
+      attackAngle = dP<dB ? angleToPlayer : angleToBase;
+      // if boss is close to base, force rush
+      if(dB<200) attackAngle=angleToBase;
+    }
+    const nx=e.x+Math.cos(attackAngle)*spd*dt,ny=e.y+Math.sin(attackAngle)*spd*dt;
     let bx=false,by=false;
     for(const w of walls){
-      if(aabb({x:nx,y:e.y,w:e.w,h:e.h},w))bx=true;
-      if(aabb({x:e.x,y:ny,w:e.w,h:e.h},w))by=true;
+      if(aabb({x:nx,y:e.y,w:e.w,h:e.h},w)){
+        bx=true;
+        // enemy scraping against wall deals damage
+        damageWall(w, (e.big||e.isBoss?60:24)*dt);
+      }
+      if(aabb({x:e.x,y:ny,w:e.w,h:e.h},w)){
+        by=true;
+        damageWall(w, (e.big||e.isBoss?60:24)*dt);
+      }
     }
     if(!bx)e.x=nx;if(!by)e.y=ny;
-    // Base-rushing: 35% of enemies always target base center instead of player
-    if(!e._rushMode){e._rushMode=Math.random()<0.35;}
-    if(!e._rushCD){e._rushCD=0;}
-    e._rushCD-=dt;
-    if(e._rushCD<=0){
-      // Periodically switch between player-targeting and base-targeting
-      e._rushMode=Math.random()<0.35;
-      e._rushCD=4+Math.random()*6;
-    }
     if(aabb(e,P)){
       if(invincT<=0){
         let dmg=9*dt;
         if(P.armor>0)dmg=Math.max(0,(9-P.armor*.09)*dt);
+        if(e.big||e.isBoss) dmg*=4;
         // Supremacy buff gives all boohbahs endless slash aoe
         if(supremacyActive>0)dmg*=2.5;
         P.hp-=dmg;if(P.hp<0)P.hp=0;
         spawnPfx(P.x-camX,P.y-camY,'#ff4444',2);
       }
     }
+    // big enemies damage nearby walls when penetrating base area
+    if((e.big||e.isBoss) && Math.hypot(e.x+e.w/2-CX,e.y+e.h/2-CY)<120){
+      for(const w of walls){
+        const dx=w.x+w.w/2-(e.x+e.w/2), dy=w.y+w.h/2-(e.y+e.h/2);
+        if(Math.hypot(dx,dy)<160)damageWall(w,50);
+      }
+    }
     // Boss ability updates
     if(e.isBoss){
+      // passive period: do nothing until timer expires
+      if(e.passiveT>0){ e.passiveT-=dt; }
+      // still decrement but skip abilities/movement if still passive
+      if(e.passiveT>0) continue;
       e.abilityT-=dt;
       if(e.abilityT<=0){
         e.abilityT=e.abilityCd;
@@ -1382,6 +1449,8 @@ function updEnemies(dt){
           e.floppingT=1.5;e.flopTarget={x:P.x,y:P.y};
           e.st=0.2;
           showMsg('🐸 JUMBAH charges a BELLY FLOP — DODGE IT!');
+          // draw a big warning ring once at the target spot
+          spawnPfx(e.flopTarget.x-camX,e.flopTarget.y-camY,'#ff8800',80);
         } else if(e.ability==='heal'){
           const healAmt=60*eDiff;
           for(const other of enemies){
@@ -1415,7 +1484,11 @@ function updEnemies(dt){
         if(e.floppingT<=0){
           e.floppingT=0;
           if(e.flopTarget&&Math.hypot(P.x-e.flopTarget.x,P.y-e.flopTarget.y)<140){
-            if(invincT<=0){P.hp=0;showMsg('💀 JUMBAH BELLY FLOP — OBLITERATED!');}
+            if(invincT<=0){
+              const dmg=P.hp*0.99;
+              P.hp=Math.max(1,P.hp-dmg);
+              showMsg('💀 JUMBAH BELLY FLOP — 99% DAMAGE!');
+            }
           }
           spawnPfx(e.flopTarget?e.flopTarget.x-camX:e.x-camX,
                    e.flopTarget?e.flopTarget.y-camY:e.y-camY,'#ff8800',50);
@@ -1508,11 +1581,28 @@ function updEnemies(dt){
   combatDrones.forEach(dr=>{
     dr.angle+=dt*1.5;
     const dx=P.x+P.w/2+Math.cos(dr.angle)*dr.r,dy=P.y+P.h/2+Math.sin(dr.angle)*dr.r;
+    // attack enemies
     for(let i=enemies.length-1;i>=0;i--){
       const e=enemies[i];
       if(Math.hypot(e.x+e.w/2-dx,e.y+e.h/2-dy)<58){e.hp-=10*dt;if(e.hp<=0)killEnemy(i,e);}
     }
+    // auto repair nearby damaged wall segment
+    let nearest=null,nd=999;
+    for(const k in wallSegHP){
+      const parts=k.split(',');
+      const wx=+parts[0], wy=+parts[1];
+      const d=Math.hypot(wx-dx,wy-dy);
+      if(d<nd){nd=d;nearest=k;}
+    }
+    if(nearest && nd<120){
+      const seg=wallSegHP[nearest];
+      if(seg && seg.hp<seg.maxHp){
+        seg.hp=Math.min(seg.maxHp,seg.hp+30*dt);
+        spawnPfx(dx-camX,dy-camY,'#44ff88',5);
+      }
+    }
   });
+
   // Bullets
   for(let i=bullets.length-1;i>=0;i--){
     const b=bullets[i];b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;
@@ -1555,9 +1645,27 @@ function updPlayer(dt){
   if(P.hp<=0&&!gameOver){gameOver=true;running=false;showDeathScreen();}
   if(invincT>0)invincT-=dt;
   else if(UPG.mk_god.bought){invincCD-=dt;if(invincCD<=0){invincCD=30;invincT=10;showMsg('👑 INVINCIBLE!');}}
+  // auto player repair cooldown
+  if(playerRepairCD>0)playerRepairCD-=dt;
 
   let mx=0,my=0;
   if(K['w']||K['W']||K['ArrowUp'])   my-=1;
+  // automatic wall repair when standing near damaged wall
+  if(playerRepairCD<=0){
+    let near=false;
+    for(const w of walls){
+      const k=getWallKey(w);
+      const seg=wallSegHP[k];
+      if(seg && seg.hp<seg.maxHp){
+        const dist=Math.hypot(w.x+w.w/2-(P.x+P.w/2),w.y+w.h/2-(P.y+P.h/2));
+        if(dist<100){near=true;break;}
+      }
+    }
+    if(near && money>=50){
+      repairWallsNear(P.x+P.w/2,P.y+P.h/2);
+      playerRepairCD=4;
+    }
+  }
   if(K['s']||K['S']||K['ArrowDown']) my+=1;
   if(K['a']||K['A']||K['ArrowLeft']) mx-=1;
   if(K['d']||K['D']||K['ArrowRight'])mx+=1;
@@ -1817,7 +1925,7 @@ function draw(){
     ctx.globalAlpha=0.04;ctx.fillStyle='#003300';
     for(let s=0;s<8;s++)ctx.fillRect(WINGS.barracks.x+s*88,WINGS.barracks.y,44,WINGS.barracks.h);
     ctx.globalAlpha=1;
-    drawBeltTrack(['br_medic','br_combat','br_rally'],'#44cc44',phase);
+    drawBeltTrack(['br_medic','br_combat','br_rally','ally_keller','ally_mccuen'],'#44cc44',phase);
     drawBeltTrack(['br_stim','br_tank','br_berserk'],'#66dd22',phase);
     if(PAD['br_rally']&&PAD['br_stim'])drawConveyorArrow(PAD['br_rally'].x,PAD['br_rally'].y,PAD['br_stim'].x,PAD['br_stim'].y,'#224422',phase);
     drawBeltTrack(['br_door','br_laser','br_sentry'],'#88ff66',phase);
@@ -1924,7 +2032,7 @@ function draw(){
     ctx.globalAlpha=1;
   });
 
-  // Armory turrets
+  // Armory turrets (drawing)
   turrets.forEach(tu=>{
     ctx.strokeStyle='rgba(255,70,50,.08)';ctx.lineWidth=1;
     ctx.beginPath();ctx.arc(tu.x,tu.y,tu.range,0,Math.PI*2);ctx.stroke();
@@ -1934,17 +2042,15 @@ function draw(){
     ctx.strokeStyle='#ff7755';ctx.lineWidth=7;
     ctx.beginPath();ctx.moveTo(tu.x,tu.y);ctx.lineTo(tu.x+Math.cos(tu.angle)*34,tu.y+Math.sin(tu.angle)*34);ctx.stroke();
   });
-  // Room sentries
+  // Room sentries (visuals only – logic already executed in update phase)
   roomSentries.forEach(tu=>{
-    tu.t-=dt;
-    let tgt=null,tgtD=tu.range;
-    for(const e of enemies){const d=Math.hypot(e.x+e.w/2-tu.x,e.y+e.h/2-tu.y);if(d<tgtD){tgt=e;tgtD=d;}}
-    if(!tgt){tu.angle+=dt*0.9;return;}
-    tu.angle=Math.atan2(tgt.y+tgt.h/2-tu.y,tgt.x+tgt.w/2-tu.x);
-    if(tu.t<=0){
-      tu.t=1/tu.bRate;
-      bullets.push({x:tu.x,y:tu.y,vx:Math.cos(tu.angle)*500,vy:Math.sin(tu.angle)*500,dmg:tu.dmg,life:0.8,col:'#88ff44'});
-    }
+    ctx.strokeStyle='rgba(136,255,68,0.08)';ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(tu.x,tu.y,tu.range,0,Math.PI*2);ctx.stroke();
+    ctx.fillStyle=tu.col||'#228844';ctx.beginPath();ctx.arc(tu.x,tu.y,18,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle=tu.col||'#44ff44';ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(tu.x,tu.y);
+    ctx.lineTo(tu.x+Math.cos(tu.angle)*28,tu.y+Math.sin(tu.angle)*28);
+    ctx.stroke();
   });
   // Laser door damage
   for(const id in laserDoors){
@@ -2160,7 +2266,8 @@ function draw(){
         ctx.globalAlpha=0.5;ctx.strokeStyle='#ff8800';ctx.lineWidth=3;ctx.setLineDash([8,5]);
         ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(e.flopTarget.x,e.flopTarget.y);ctx.stroke();
         ctx.setLineDash([]);ctx.globalAlpha=0.3;
-        ctx.fillStyle='#ff4400';ctx.beginPath();ctx.arc(e.flopTarget.x,e.flopTarget.y,100,0,Math.PI*2);ctx.fill();
+        // larger telegraph circle to make dodge zone obvious
+        ctx.fillStyle='#ff4400';ctx.beginPath();ctx.arc(e.flopTarget.x,e.flopTarget.y,140,0,Math.PI*2);ctx.fill();
         ctx.globalAlpha=1;
       }
       // Name tag
@@ -2344,7 +2451,12 @@ function updPanel(){
     const u=UPG[id];
     if(u.bought&&u.type!=='mul')return'Purchased';
     if(u.type==='mul'&&u.lv>=u.max)return'Maxed out';
-    if(!reqMet(id))return'Req: '+(UPG[u.req]?UPG[u.req].label:'?');
+    if(!reqMet(id)){
+      let reqText='?';
+      if(Array.isArray(u.req))reqText=u.req.map(r=>UPG[r]?UPG[r].label:r).join(' & ');
+      else reqText=UPG[u.req]?UPG[u.req].label:u.req;
+      return'Req: '+reqText;
+    }
     if(u.type==='inc')return'+'+u.iv+'/s · $'+u.cost;
     if(u.type==='mul')return'Next: $'+getCost(id);
     return'$'+u.cost;
@@ -2352,7 +2464,13 @@ function updPanel(){
   function tipHTML(id){
     const u=UPG[id];
     const nc=u.type==='mul'&&u.lv<u.max?`<div class="tc">Next: $${getCost(id)}</div>`:'';
-    const req=!reqMet(id)?`<div class="treq">🔒 Buy ${UPG[u.req]?UPG[u.req].label:''} first</div>`:'';
+    let req='';
+    if(!reqMet(id)){
+      let reqText='';
+      if(Array.isArray(u.req)) reqText=u.req.map(r=>UPG[r]?UPG[r].label:r).join(' & ');
+      else reqText=UPG[u.req]?UPG[u.req].label:u.req;
+      req=`<div class="treq">🔒 Buy ${reqText} first</div>`;
+    }
     const tut=!isBuyableNow(id)&&reqMet(id)&&TUT.step<6?'<div class="treq">📖 Complete tutorial step '+TUT.step+'</div>':'';
     return`<div class="tip"><b>${u.icon} ${u.label}</b>${u.desc}${nc}${req}${tut}</div>`;
   }
@@ -2369,7 +2487,7 @@ function updPanel(){
     sec('💰 INCOME BELT',['i_scrap','i_moss','i_crystal','i_nest','i_star','i_plasma','i_dark','i_royalties'])+
     sec('🏠 ROOM UNLOCKS',['r_tower','r_armory','r_barracks','r_genroom','r_lab','r_market'])+
     sec('🚪 BASE SYSTEMS',['door','flood','beacon','medkit','shield','jammer'])+
-    sec('🎵 PHIL UPGRADES',['music','boots','suit','weapon','aura','vampire','rally','stim'])+
+    sec('🎵 PHIL UPGRADES',['music','boots','suit','weapon','aura','vampire','rally','stim','ally_keller','ally_mccuen'])+
     (OPEN.tower?sec('🗼 WATCH TOWER',['tw_scope1','tw_scope2','tw_early','tw_flare','tw_snipe'])+sec('🗼 TOWER DEFENSES',['tw_door','tw_laser','tw_sentry']):'')+
     (OPEN.armory?sec('🔫 ARMORY',['ar_wall1','ar_turret1','ar_turret2','ar_mines','ar_flak','ar_shield','ar_autorepair'])+sec('🔫 ARMORY DEFENSES',['ar_door','ar_laser','ar_sentry']):'')+
     (OPEN.barracks?sec('🪖 BARRACKS',['br_medic','br_combat','br_rally','br_stim','br_tank','br_berserk'])+sec('🪖 BARRACKS DEFENSES',['br_door','br_laser','br_sentry']):'')+
@@ -2392,6 +2510,9 @@ function showDeathScreen(){
   el.style.display='flex';
   document.getElementById('deathTime').textContent=Math.floor(gameTime)+'s survived';
   document.getElementById('deathKills').textContent=totalKills+' Boohbahs defeated';
+  // update hint in case we add extra instructions below
+  const hintEl=document.getElementById('deathHint');
+  if(hintEl)hintEl.textContent='Press any key or ▶ TRY AGAIN to restart';
 }
 function restartGame(){
   document.getElementById('deathScreen').style.display='none';
@@ -2451,12 +2572,20 @@ function updAutoRepair(dt){
 // ── LOOP ───────────────────────────────────────────────
 function loop(ts){
   if(!running)return;
-  const dt=Math.min((ts-lastT)/1000,.1);lastT=ts;
-  incAcc+=income*dt;
-  if(incAcc>=1){money+=Math.floor(incAcc);incAcc%=1;}
-  updPlayer(dt);updCam();updEnemies(dt);updPfx(dt);updBeacon(dt);updCoinDrops(dt);updAutoRepair(dt);
-  draw();
-  requestAnimationFrame(loop);
+  try{
+    const dt=Math.min((ts-lastT)/1000,.1);lastT=ts;
+    incAcc+=income*dt;
+    if(incAcc>=1){money+=Math.floor(incAcc);incAcc%=1;}
+    updPlayer(dt);updCam();updEnemies(dt);updPfx(dt);updBeacon(dt);updCoinDrops(dt);updAutoRepair(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }catch(e){
+    console.error('Game loop error',e);
+    showMsg('⚠️ Crashed: '+e.message);
+    running=false;
+    gameOver=true;
+    showDeathScreen();
+  }
 }
 
 // ── START ──────────────────────────────────────────────

@@ -146,6 +146,14 @@ body{background:#0a0a1a;overflow:hidden;font-family:'VT323',monospace;color:#e0d
 <div id="minimap"><div id="mmLabel">📡 MINIMAP</div><canvas id="mmCvs"></canvas></div>
 <div id="tutBox" style="display:none"></div>
 
+
+<div id="deathScreen" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;flex-direction:column;align-items:center;justify-content:center;font-family:'Press Start 2P',monospace;color:#fff;gap:18px;">
+  <div style="font-size:clamp(14px,3vw,28px);color:#ff4444;text-shadow:0 0 20px #ff2200;">💀 PHIL IS DOWN 💀</div>
+  <div style="font-size:clamp(9px,1.5vw,14px);color:#ff8888;">The Boohbahs have claimed another victim.</div>
+  <div id="deathTime" style="font-size:clamp(9px,1.4vw,13px);color:#ffaa44;"></div>
+  <div id="deathKills" style="font-size:clamp(9px,1.4vw,13px);color:#44ffaa;"></div>
+  <button onclick="restartGame()" style="margin-top:18px;padding:14px 32px;font-family:'Press Start 2P',monospace;font-size:clamp(9px,1.4vw,13px);background:#aa44ff;color:#fff;border:none;border-radius:8px;cursor:pointer;box-shadow:0 0 18px #aa44ff88;">▶ TRY AGAIN</button>
+</div>
 <div id="titleScreen">
   <div class="spin">🛸</div>
   <h1>STRANDED ON<br>BOOHBAH PLANET</h1>
@@ -174,7 +182,7 @@ const MM=290;
 mmEl.width=MM;mmEl.height=172;
 
 // ── STATE ──────────────────────────────────────────────
-let running=false,money=2000,income=15,incAcc=0,lastT=0,beaconT=0;
+let running=false,money=999999,income=15,incAcc=0,lastT=0,beaconT=0;
 let camX=0,camY=0;
 let walls=[],doors=[],enemies=[],bullets=[],turrets=[],pfx=[],splashPfx=[];
 let mines=[],coinDrops=[],beltCoins=[];
@@ -471,6 +479,7 @@ const UPG={
   ar_mines:   {icon:'💣',label:'Proximity Mines',  type:'mul',cost:230,costM:2.1,max:3,lv:0,req:'ar_wall1',    desc:'Mines placed around base perimeter. Big explosion radius.'},
   ar_flak:    {icon:'🔥',label:'Flak Cannon',      type:'one',cost:1300,req:'ar_turret2',  desc:'AoE cannon fires every 8s at the largest enemy cluster.'},
   ar_shield:  {icon:'🛡️',label:'Aegis System',    type:'one',cost:1700,req:'ar_flak',      desc:'Energy barrier absorbs 60 damage, refreshes every 20s.'},
+  ar_autorepair:{icon:'🔧',label:'Auto-Repair Drones',type:'mul',cost:600,costM:1.8,max:3,lv:0,req:'ar_shield',desc:'Each level: drones auto-repair walls at 12 HP/s each. Stack for faster repairs.'},
 
   // BARRACKS — two parallel conveyor lines
   br_medic:   {icon:'💊',label:'Field Medic',      type:'mul',cost:200,costM:1.9,max:4,lv:0,req:null,          desc:'Each level: +2 HP/s passive regeneration.'},
@@ -529,7 +538,7 @@ const UPG={
 const PAD={};
 const ROOM_PADS={
   tower:   ['tw_scope1','tw_scope2','tw_early','tw_flare','tw_snipe','tw_door','tw_laser','tw_sentry'],
-  armory:  ['ar_wall1','ar_turret1','ar_turret2','ar_mines','ar_flak','ar_shield','ar_door','ar_laser','ar_sentry'],
+  armory:  ['ar_wall1','ar_turret1','ar_turret2','ar_mines','ar_flak','ar_shield','ar_autorepair','ar_door','ar_laser','ar_sentry'],
   barracks:['br_medic','br_combat','br_rally','br_stim','br_tank','br_berserk','br_door','br_laser','br_sentry'],
   genroom: ['gen_up1','gen_up2','gen_over','gen_beacon','gen_fusion','gen_door','gen_laser','gen_sentry'],
   lab:     ['lab_range','lab_explo','lab_xray','lab_drone','lab_nano','lab_door','lab_laser'],
@@ -537,6 +546,7 @@ const ROOM_PADS={
 };
 
 let fusionBought=false,invincT=0,invincCD=30,aegisHP=0;
+let totalKills=0;
 let combatDrones=[];
 // Room defense state
 let laserDoors={}; // id -> {active: bool} — player toggles these
@@ -753,8 +763,8 @@ function makePads(){
   const A=WINGS.armory;
   const aSp=190, aX0=A.x+80;
   ['ar_wall1','ar_turret1','ar_turret2'].forEach((id,i)=>pl(id, aX0+i*aSp, A.y+200));
-  ['ar_mines','ar_flak','ar_shield'].forEach((id,i)=>pl(id, aX0+i*aSp, A.y+420));
-  PAD_ROWS.armory=[['ar_wall1','ar_turret1','ar_turret2'],['ar_mines','ar_flak','ar_shield']];
+  ['ar_mines','ar_flak','ar_shield','ar_autorepair'].forEach((id,i)=>pl(id, aX0+i*aSp, A.y+420));
+  PAD_ROWS.armory=[['ar_wall1','ar_turret1','ar_turret2'],['ar_mines','ar_flak','ar_shield','ar_autorepair']];
 
   // ── BARRACKS (700×700): 2 rows of 3 ──
   const B=WINGS.barracks;
@@ -971,12 +981,18 @@ function rebuildRoomSentries(){
   ];
   for(const def of roomDefs){
     if(!OPEN[def.wing])continue;
-    const u=UPG[def.id];if(!u||u.lv===0)continue;
+    const u=UPG[def.id];
+    if(!u||typeof u.lv!=='number'||u.lv<=0)continue;
     const wing=WINGS[def.wing];
+    const lv=u.lv;
+    const range=180+lv*70;
+    const dmg=18+lv*14;
+    const bRate=0.8+lv*0.4;
+    if(!isFinite(range)||!isFinite(dmg)||!isFinite(bRate)||bRate<=0)continue;
     roomSentries.push({
       x:wing.x+wing.w*def.offX, y:wing.y+wing.h*def.offY,
       t:Math.random()*2, angle:Math.random()*Math.PI*2,
-      range:180+u.lv*70, dmg:18+u.lv*14, bRate:0.8+u.lv*0.4, burst:1,
+      range, dmg, bRate, burst:1,
       col:wing.accent
     });
   }
@@ -1063,6 +1079,7 @@ function applyOne(id){
     tw_early: ()=>showMsg('📣 Early Warning active!'),
     tw_snipe: ()=>showMsg('💥 Tower sniper bonus active!'),
     ar_flak:  ()=>showMsg('🔥 Flak Cannon armed!'),
+    ar_autorepair:()=>showMsg('🔧 Auto-Repair Drones deployed! Lvl '+UPG.ar_autorepair.lv),
     ar_shield:()=>{aegisHP=60;showMsg('🛡️ Aegis System online!');},
     br_rally: ()=>showMsg('🚩 War Cry — +35% damage zone!'),
     br_berserk:()=>showMsg('😤 Berserker Mode enabled!'),
@@ -1113,9 +1130,9 @@ function applyMul(id){
     lab_range: ()=>{WPN.range+=35;},
     lab_drone: ()=>rebuildDrones(),
     tw_sentry: ()=>rebuildRoomSentries(),
-    ar_sentry: ()=>rebuildRoomSentries(),
-    br_sentry: ()=>rebuildRoomSentries(),
-    gen_sentry:()=>rebuildRoomSentries(),
+    ar_sentry: ()=>{try{rebuildRoomSentries();}catch(e){console.error('Sentry rebuild error',e);showMsg('⚠️ Sentry failed to deploy.');}},
+    br_sentry: ()=>{try{rebuildRoomSentries();}catch(e){console.error('Sentry rebuild error',e);showMsg('⚠️ Sentry failed to deploy.');}},
+    gen_sentry:()=>{try{rebuildRoomSentries();}catch(e){console.error('Sentry rebuild error',e);showMsg('⚠️ Sentry failed to deploy.');}},
   };
   if(acts[id])acts[id]();
 }
@@ -1184,7 +1201,7 @@ function inTower(){
   const T=WINGS.tower;
   return P.x>=T.x&&P.x<=T.x+T.w&&P.y>=T.y&&P.y<=T.y+T.h;
 }
-function killEnemy(i,e){
+function killEnemy(i,e){totalKills++;
   let reward=8+WPN.lv*3+(UPG.mk_loot.lv*8);
   if(UPG.rally.bought||UPG.br_rally.bought)reward=Math.floor(reward*1.25);
   if(UPG.mk_black.bought)reward+=25;
@@ -1232,9 +1249,12 @@ let supremacyActive=0; // timer for zingzing supremacy
 
 // Boss and player images
 const IMG={};
-['humbah','jingbah','jumbah','zumbah','zingzingzingbah','philcollins'].forEach(n=>{
-  const img=new Image();img.src=n+'.jpg';IMG[n]=img;
-});
+(()=>{const img=new Image();img.src='data:image/jpeg;base64,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';IMG['zumbah']=img;})();
+(()=>{const img=new Image();img.src='data:image/jpeg;base64,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';IMG['jumbah']=img;})();
+(()=>{const img=new Image();img.src='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5OjcBCgoKDQwNGg8PGjclHyU3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3N//AABEIAFoAWgMBEQACEQEDEQH/xAAbAAACAwEBAQAAAAAAAAAAAAAABQMEBgIBB//EADYQAAEDAgQFAgMFCQEAAAAAAAEAAgMEEQUSITETIkFRYQYycYHhQnKRwfAUMzVDU6GxsvEj/8QAGwEAAQUBAQAAAAAAAAAAAAAAAAECBAUGAwf/xAAzEQACAQMDAgIIBgIDAAAAAAAAAQIDBBESITEFQVFxEyJhkaHB4fEGNIGx0fAUIzIzUv/aAAwDAQACEQMRAD8A+4oAEACABAEFZUtpos7he5sAOpUS8vIWlL0k/udKdN1JYQqdiVQXA8g8AaLM1OvXLmnFJLw597/jBMVrDG5eoa8VDuG8Bsm47EK76d1WF49DWJfD9CNVoOms9i8rY4AgAQAIAEACABAAgAQBnfU+LUWHx8WvqGQQxe57zYXKzXVZO5uI0Yxb08pd2/ljv4sm28GoORRbVwuj4jXgstus7L1KqjKHGMrx+5NUG1szzCsVo6qaKppqmOWKN9nOYbgdCp1rF2lzTqVE445z7ds+W625GVISlBxW+TYAgi4NwtynkqD1AAgAQAIAX4jWSUb7kAsLdPBVF1TqFxZ1Y6cOLXx/rRJoUY1V7QwuubUtLCXZxrc9U7o/UP8AIg6c36y/YLii6bz2GCuyMVq+pbTU7nF1nEHLbuoN/dwtqLk3u+PM60abqSwYP1Hg1F6hoHUWIzStjc4O0ccwd3usfZ9Rr20nJetnnJa1KOtace4sU2GUFPgzMKY5z4RFwzI55Lnaak6boqXs6lwrhxWpe7YaqU4x0rgWemPS9F6cinhpqyonjkOzjfKOw6DUk/Ndb3qlW6iouKWBaVL0fHfxN7g1Wx0LKY3EjQbX6hXfRb6E6UbeT9ZfFewg3VJqTn2GaviIU8SqmQU7xf8A9HAhrQdfioV/cwt6EpN79vM60qbnJIoUtaZHMjic4DMAQdm6rPWXUa9WrTo6sLP9/gk1aGhOTHPzWuIJVrqBlY0iSR7Rb7NlW3nTKd1LVOT/AE+x2pV5UnshC9rqGZ8TjzNPu8dD+Cxt1QnaXDhnjh/Ms4tVoqRbixOojFnEPA1u4aqfQ63d044liXnz8MHCVtTb22KNZWTVMt5CCAOXKNAod1e1buanU7cIkUqMKa2Kkk8j2sZxGhrb+5v6uuSeYpPt8zuoJNvBG4kXc4gC2to90u3ApLnDm6yWG+gTHEbjD4JoJXMlY6FxBuCHW2S06k6U1ODw0MnFOLUi/UVlRZwfO4tvcFmgI2Uyt1K8k2nU29m3u2yRY0YdkVpHhz+QHMQN9blQKknVknh5eFznL+rO0VpW44w/Co4GB8hc6QjW528LYWfRqFKKlU3l+3uIFa6lN4XAysroinqAFWO0nFi/aGjmiGvkfRUPXbT0tH00eY/t9CZZ1dMtD4YnZM6+Rlg06afaWTU5JYTxknuC5ZC64As5ultSbWTVg6IAxsg5w079kucCNtcETYY73MbCOhsna34jtT8S3TxiSneyNjG5RmJsNuy60oSqRkljbfPfHgv4OM3pkmyMB2bZxHc91HfA/Y7eCG5u39xYpENWG8DHB6QSltQ5vI03Zcb+Vo+idPUn/kVFxx/JDuqrXqL9R6tUQAQAIAoY1UcCheAbPk5G/P6Ks6tcegtZeMtl+v0JFrT11F4LczcdiwDSw2CwrLaXJI1nEz6tGUXBPVPhDKbzx8fIa5YwcNbdt2uaCN/CaK3vudCNxIIvYdUjeBNSBjWjMSTa+3ZArbZ20tPv1OmyQa01wdyMceXcbk3/AD6J7hKPI2LQ2wSYmJ0LySW6i46LU/h+5c4SoyfG68vuQbuCUtSGi0REBAAgBL6hJc6BgLRo43cbDos3+IMydKGfEn2W2p+QnB5bNJ266m6zBPx4nsZ1uCCepy6pBGju7XAZg3MjKG4a4PWTua18Y9qXVJRcU9mDgsqR20i3LFfzZNyNee7OZHEi5dlOvklHIqR4C7IY/dmdry9E9TxFxS594uFnJawubLXsAGkgIP6+Ss+jVXTvIr/1lfP5HC4hmk34GjW3KsEACAEXqlp4ULwDYOIJv3/4s9+IINwpzxw3/fgWHT2tUkJIT0bp3v0WVftLGS8S20SRwiR7eR40JG6WVKagptbPg4+rKWFyjk6+6zXHveyYKcty2Aac23ySi7koqHBgZpa/ZLrajo7DPRrOTy+gdl0I6pouOxwc2XU6eRZGR2xPhLXyV0elrOuT8FY9Kpud7DT23+ByuWlSZqVvCnBAAgCvXUsdZTuhkGh2PY91HuraFzSdOX2OlKq6U1JGPnhlpJnQytAe0a9iO4WEuLedCo6c1uv7kvYTjUimuCRs3JwyDobgk6BR3uhunfJ41w+1ex0+CR5FaJXGMyENBLNLXbqUstOp6ePac0pY3JLNJFhbyU3uNyyVnC4DiSeNewFtF3j6H0Tbfr52WNsf35DHq1bcFUve2NzHuDWONyNwVx1SUXFPZ/I7YTeVyOsEoeHmqZAQXjkB0IHlazolhKlH09Tl8eX1K+7ravUXYbrQEIEACABAFPEcPir4sr+V49sg3b9FCvbGndw0y57PwO1GvKjLK4MtVQzUUwgny5j7XDZwWMurKrbVNE15e0uaVSFWOqJw48OV0b8oI83CjThKDcX2Hr1llHTHiwIc0bJmBGiQPLLe0juE3kZpye8XObOJJOwHU9LJyjJ4S5E044HeGYUIzx6pjDIdm7hvx8rXdM6QqH+yvvLt7PqV9e61erB7DZXxCBAAgAQAIAEAIfVNIH08dSN4nWd8D9VRddoaqSqrts/J/Usen1dM3DxMs5rg67XElZjPiXI5wzApKymZUSTuhzE2bkvp0N7q4tOkf5FJVJSxn2FfcXypzcEsi2cSwVctPIP3bi2+1x3VXcW/oakoPlEuDjUgpruNMEpxNWxZjmDTm/D62XbpVL015BPhb+76kS8npps1gW6KUEACABAAgAQAIApYz/Daj7igdT/KVPI72v8A3RMYdx90LDLg0C4NzQgCipwP6bf8L0C0SVvBLwX7GbqbzfmZj1GAcbZcD9y3/ZyzfXfzC8l+7Lewf+h+fyRe9PgftR0/lfmFz/D/AOal5fNHC+/4fqaBbArAQAIAEAf/2Q==';IMG['humbah']=img;})();
+(()=>{const img=new Image();img.src='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5OjcBCgoKDQwNGg8PGjclHyU3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3N//AABEIAFoAWgMBEQACEQEDEQH/xAAbAAACAgMBAAAAAAAAAAAAAAAABgQFAQIDB//EADEQAAIBAwMCBQIFBAMAAAAAAAECAwAEEQUSITFBBhNRYXEigZGhsdHwFEJSwTIz4f/EABoBAAIDAQEAAAAAAAAAAAAAAAAFAQIEBgP/xAAuEQACAQMEAQIEBgMBAAAAAAAAAQIDBBEFEiExQRNRInGBsSMyM2HR8EKRwRX/2gAMAwEAAhEDEQA/APcaACgAoAKAK7WNTTTol+kPLJwi/wCz7VjvLtW8est9Gm2tnXl7JC6+sX7yCTz9pHQKAB+FIJahcylu3YG0bOgljBcaJrD3cn9PcBfM25Vh/dTaw1B1n6c+xfd2ipLfDou6amAKACgAoAKAMZoAzQAUAFACV4mv7aW/Lbi6W67MIMlmzkgAdf8Ayufv5evXUYc4HdnTdKjmXGefoU1lq9pqMCT2To8XZl70tqUZQe2SwzbBKS3J5TJGk+IbGTWPIhbF3BiRo9pXcp9P9GtUYVbeUa7jhf3+oyz2VFKmpZPRI3DorL0IyK6eLysoRNYeDapICgAoAKAFjVdSlsbuaPzSUY8YP5VzF7WrQrzhCfDG9tbwq01LHJY6BqEVxZJGWCypkFGPOPX4prpteDoKnnlGW8oShUbxwy2pkYit1nU4tPhwQWlcHYo/U+1Y7u7hbx57fRqtraVaXHSPOtU0+11GwntLoSpDMMPt4GeOQex4Fc7Qr1KMt0R9VpKrHbINF0/TtF0+OxtMmJc8vknn3ouLirXkpS8FKVD0o7Ykew0TR7DU7m+sQ63V0SZWBJPLbjgduQK9Kt7XqQ2T6K07SNOW5Id/Cl/HEpspNyEtmMHp06e1btMuYx/Ck+X1/Bj1GhJv1V9Rop4KDheXMdpbvNKcKgz7n2FedWrGlBzl4L06cqklGIqR6/cmaWOIkGU5CtyV+PauYV7cLcoy/M/9Dp2NPCcvA3x7hGocgvgbiO5rqY5UVnsRyxl4KzUtBtL5GODHLkkOp7+4rFV06hNNxWG/JroXtSk/dCmmba6Ed1GSUbDKK5uUNk8TXXaHbfqQzB9kqHULssVt7mZfqAUFt1XhdXEOIyZ4yoUu5RRD1WeWa8bzp/P4GHA6D24qatWdWW6css9reEYQ+FYIG9N5ZZSM8EEdPmqYfse+H1g4s+88Pn1Bj61bHBfB2iuZoJlkilUFT/gBQuOV2UlCM44kjolxKrCVGbeDlWqqzF5XGCHCLW19DBH4g1BoiB5RKgbn2H8etbv/AFLjGOBa9Pop5eStur2aZybiRpG7Z5wKw1alSs903k106MIL4VgudF8OxSQx3dxJKHcEoitgKD0pvbabCpSUqvkwXV/JSdOCWEMqR7UVQxOBjJPNN401GKivApby8m9ehAveJtNVo2vYlO9RiQKOo9ftSfU7RSXrR78jKwuGn6UuvArxnfl05XouOM0hfHDHD44ZrJkH/iR6sOeKlEolwxmGyeaSJHRzsG7BIOKth43fQ8ZNSqKKeMcla0MbDIiXOe4oy/c05ZtHDGEyqLn144+KHJkOTyZBO7ORgZx9Q4qAJEc8kER8t8hjyB3HFR3lHm4Rk+US9Js11XUlUqFiUb3A6YB6fetllb+tVw+l2eFzVdvSznnwPYGAABgV1JzpmgAoAqfEl0bfTzGjYeY7B8d/2+9LtTrOnR2rt8fybLGlvq5fSFC2ikZ1RVJ39Pf4x0rmktzwux5OUUsszJhS2T9WcN25qEmEeUcpBvjP1kEjGewqVwyy4ZgQyNtKKxX2Hep3Inel2Y2HONy4B6UBk2igDwyyjyysZGRnr8VbshzxJR9zHBAbo2M5NVJLTwle+RqjwPtVbgYGB/cOn5ZprplXZU2PyYtSpbqSkvH2HaugEIUAFACj4tuS1/HBg7Y493zk8/pXP6tPNVR9l9x1p1PFNz92U4lKxSRqF5YMrc8fHzSrPHJuceUzEW7OWKNjqAORUPBZnTKHh4xkjrjFV5KYfhm6XxtoWSPgHAzjkVZJlXRU5Jsjja3L43H1PBo58HpyujR3Dr0QAdfQCpSLJYNVbggFCOmMCpZLRI09St3BcLnYk8YZuMjnpj09696GY1Iy/dHlWeYSg+8M9FrrTmAoAD0oASPFqvFqjOwO11UqRxx0Nc5qUWrjL8of6a06OPYqlLY9vQ5wKXM2vGTop3AHC+59qqyrO8N4IlYBFYMCPq7e9CWDzlS3NckZsMT2B5HoKno9VwYUAZ3kcngg0NgSIZBIhiSLdIxG0Z5qNrb4POUcPc3wRJS6blOeDg+x96skescPo10seZqlrENzBpVyOMnkfhWmhHdViv3QXD20ZP8AZnqA6V1ZyYUAFAC/4s06S5hS6hyWhH1qD/b1zSvUrZ1IqpHtfYZadXjCThLz9xWjuDHA0UaqyychsfVkVz/aHLhmW5+CfbQxS2LSO4imjHAJOWoUYuMm5Yx49zNOco1EkspkIqpO44Hpg8VXLNGTSTyg3BBBPc9qlZwSs+QulhhfbDKrEgHI7H0+atj98kU3KS5Ri2uhby+c0jBl6OnUH+GpWU00TUp7ltwRZ5XcksSxbkt6/v2qUj1jFLoZPB2kF5Bqc6kKoxB1+rjG6nGnWz/Vl9BTqV1hejH6/wADjTkShQAUABGRg0ALOueHUKtc6bGUlJ+uJDgOPb0pTe6epLfSXPsNLW/a+Cq+PcXN+zO/hgcMjdVwelIHFp4Y3wn0YefJ4U5P2xRtBROb7mGCmBj17VK4LI5SMNpPc+/erIsjSRvJYb1Iz9S57j+YqdrJXPQwaD4Zkuz/AFOpIY4TjZD0Le59B7daa2mnuXx1evYWXeoKHwUuX7jqqhVCqAABgAdBTxLHCEWc9maACgAoAKACgBI8Y2Zj1EXEa/8AagP3HB/LFc/qdPbWUvDQ+0yrupbH4FeS6aEkfUPjmsCjkbKCkWg0DVprNbyOOIwtH5nMnO3Gf4K2Kwq7N2DG763jN02+c46KLzncZXjvycVlSRvwkXOgW0+p6xZpJKzrEQzZ7Kpz+w+9aLWn6laMf7wYrupGhQk0u/8Ap6fXSnKhQAUAFABQAUAFACz4zAMVvkf5/oKTav8A4fUbaV3L6CGwDXSqwyvmgYPSltLmSHy/Kz19FCxhVACgYAA4ArqlwcW3nlnk2rALfXYUAATvjHya5Wp+pL5s7Gi/w4/JDL4BA/rLo9/KH60w0v8AUl8hXq/5I/Md6diIKACgAoA//9k=';IMG['zingzingzingbah']=img;})();
+(()=>{const img=new Image();img.src='data:image/jpeg;base64,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';IMG['jingbah']=img;})();
+['philcollins'].forEach(n=>{const img=new Image();img.src=n+'.jpg';IMG[n]=img;});
 
 function spawnBoss(bossIdx){
   const b=BOSSES[bossIdx];
@@ -1318,7 +1338,9 @@ function updEnemies(dt){
     e.wob+=dt*3;
     const spd=e.speed*(e._slow?0.45:1);
     const angleToPlayer=Math.atan2(P.y-e.y,P.x-e.x);
-    const angle=jamActive&&e._jamA!=null?e._jamA:(e._deaggro?e._wanderA:angleToPlayer);
+    const angleToBase=Math.atan2(CY-e.y,CX-e.x);
+    const baseAngle=e._rushMode?angleToBase:angleToPlayer;
+    const angle=jamActive&&e._jamA!=null?e._jamA:baseAngle;
     const nx=e.x+Math.cos(angle)*spd*dt,ny=e.y+Math.sin(angle)*spd*dt;
     let bx=false,by=false;
     for(const w of walls){
@@ -1326,14 +1348,15 @@ function updEnemies(dt){
       if(aabb({x:e.x,y:ny,w:e.w,h:e.h},w))by=true;
     }
     if(!bx)e.x=nx;if(!by)e.y=ny;
-    // Occasional de-aggro: wander randomly for a bit
-    if(!e._deaggroT){e._deaggroT=0;e._deaggroCD=8+Math.random()*12;}
-    e._deaggroCD-=dt;
-    if(e._deaggroCD<=0&&!e._deaggro){
-      e._deaggro=true;e._deaggroT=2+Math.random()*3;
-      e._wanderA=Math.random()*Math.PI*2;e._deaggroCD=10+Math.random()*15;
+    // Base-rushing: 35% of enemies always target base center instead of player
+    if(!e._rushMode){e._rushMode=Math.random()<0.35;}
+    if(!e._rushCD){e._rushCD=0;}
+    e._rushCD-=dt;
+    if(e._rushCD<=0){
+      // Periodically switch between player-targeting and base-targeting
+      e._rushMode=Math.random()<0.35;
+      e._rushCD=4+Math.random()*6;
     }
-    if(e._deaggro){e._deaggroT-=dt;if(e._deaggroT<=0)e._deaggro=false;}
     if(aabb(e,P)){
       if(invincT<=0){
         let dmg=9*dt;
@@ -1529,6 +1552,7 @@ function updPlayer(dt){
   if(WPN.t>0)WPN.t-=dt;
   if(WPN.swT>0)WPN.swT-=dt;else WPN.sw=false;
   if(P.regen>0)P.hp=Math.min(P.maxHp,P.hp+P.regen*dt);
+  if(P.hp<=0&&!gameOver){gameOver=true;running=false;showDeathScreen();}
   if(invincT>0)invincT-=dt;
   else if(UPG.mk_god.bought){invincCD-=dt;if(invincCD<=0){invincCD=30;invincT=10;showMsg('👑 INVINCIBLE!');}}
 
@@ -2347,7 +2371,7 @@ function updPanel(){
     sec('🚪 BASE SYSTEMS',['door','flood','beacon','medkit','shield','jammer'])+
     sec('🎵 PHIL UPGRADES',['music','boots','suit','weapon','aura','vampire','rally','stim'])+
     (OPEN.tower?sec('🗼 WATCH TOWER',['tw_scope1','tw_scope2','tw_early','tw_flare','tw_snipe'])+sec('🗼 TOWER DEFENSES',['tw_door','tw_laser','tw_sentry']):'')+
-    (OPEN.armory?sec('🔫 ARMORY',['ar_wall1','ar_turret1','ar_turret2','ar_mines','ar_flak','ar_shield'])+sec('🔫 ARMORY DEFENSES',['ar_door','ar_laser','ar_sentry']):'')+
+    (OPEN.armory?sec('🔫 ARMORY',['ar_wall1','ar_turret1','ar_turret2','ar_mines','ar_flak','ar_shield','ar_autorepair'])+sec('🔫 ARMORY DEFENSES',['ar_door','ar_laser','ar_sentry']):'')+
     (OPEN.barracks?sec('🪖 BARRACKS',['br_medic','br_combat','br_rally','br_stim','br_tank','br_berserk'])+sec('🪖 BARRACKS DEFENSES',['br_door','br_laser','br_sentry']):'')+
     (OPEN.genroom?sec('⚡ GENERATOR',['gen_up1','gen_up2','gen_over','gen_beacon','gen_fusion'])+sec('⚡ GEN DEFENSES',['gen_door','gen_laser','gen_sentry']):'')+
     (OPEN.lab?sec('🔬 LAB',['lab_range','lab_explo','lab_xray','lab_drone','lab_nano'])+sec('🔬 LAB DEFENSES',['lab_door','lab_laser']):'')+
@@ -2362,11 +2386,66 @@ function updPanel(){
   });
 }
 
+// ── DEATH SCREEN ──────────────────────────────────────
+function showDeathScreen(){
+  const el=document.getElementById('deathScreen');
+  el.style.display='flex';
+  document.getElementById('deathTime').textContent=Math.floor(gameTime)+'s survived';
+  document.getElementById('deathKills').textContent=totalKills+' Boohbahs defeated';
+}
+function restartGame(){
+  document.getElementById('deathScreen').style.display='none';
+  gameOver=false;
+  // Reset all state
+  money=500;income=5;incAcc=0;
+  enemies.length=0;pfx.length=0;bullets.length=0;coinDrops.length=0;
+  codeProjectiles.length=0;
+  activeBosses.length=0;bossesSpawned=0;
+  gameTime=0;eRate=5;eDiff=1;eT=0;
+  rebellionActive=0;supremacyActive=0;
+  invincT=0;invincCD=30;aegisHP=0;
+  fusionBought=false;
+  totalKills=0;
+  P.hp=100;P.maxHp=100;P.speed=170;P.armor=0;P.regen=0;P.vampR=0;
+  P.x=CX-P.w/2;P.y=HUB.y+HUB.h+WT+55;
+  // Reset upgrades
+  for(const id in UPG){
+    const u=UPG[id];
+    u.bought=false;
+    if(u.type==='mul')u.lv=0;
+  }
+  OPEN.tower=false;OPEN.armory=false;OPEN.barracks=false;
+  OPEN.genroom=false;OPEN.lab=false;OPEN.market=false;
+  Object.keys(laserDoors).forEach(k=>delete laserDoors[k]);
+  roomSentries.length=0;
+  wallSegHP={};
+  genTerrain();makePads();buildWalls();initWallHP();initAllies();
+  updPanel();updPassivesHUD();
+  TUT.step=1;advanceTutorial(1);
+  running=true;lastT=performance.now();
+  showMsg('🛸 Phil Collins — Try again!');
+  requestAnimationFrame(loop);
+}
+
 // ── MESSAGES ───────────────────────────────────────────
 function showMsg(t){
   const l=document.getElementById('msgLog');
   const d=document.createElement('span');d.className='msg';d.textContent=t;
   l.appendChild(d);setTimeout(()=>d.remove(),3400);
+}
+
+// ── AUTO-REPAIR ───────────────────────────────────────
+function updAutoRepair(dt){
+  const lv=UPG.ar_autorepair&&UPG.ar_autorepair.lv||0;
+  if(lv<=0)return;
+  const ratePerDrone=12; // HP/s per level
+  const totalRate=ratePerDrone*lv;
+  for(const k in wallSegHP){
+    const seg=wallSegHP[k];
+    if(seg.hp<seg.maxHp){
+      seg.hp=Math.min(seg.maxHp,seg.hp+totalRate*dt);
+    }
+  }
 }
 
 // ── LOOP ───────────────────────────────────────────────
@@ -2375,7 +2454,7 @@ function loop(ts){
   const dt=Math.min((ts-lastT)/1000,.1);lastT=ts;
   incAcc+=income*dt;
   if(incAcc>=1){money+=Math.floor(incAcc);incAcc%=1;}
-  updPlayer(dt);updCam();updEnemies(dt);updPfx(dt);updBeacon(dt);updCoinDrops(dt);
+  updPlayer(dt);updCam();updEnemies(dt);updPfx(dt);updBeacon(dt);updCoinDrops(dt);updAutoRepair(dt);
   draw();
   requestAnimationFrame(loop);
 }
